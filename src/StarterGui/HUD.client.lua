@@ -1,343 +1,379 @@
 -- HUD.client.lua
--- Builds and updates the in-game heads-up display.
+-- Full in-game heads-up display: HP, shield, gravity cooldown radial,
+-- combo counter, boss health bar, heal flash, zone banner.
 
 local Players           = game:GetService("Players")
 local TweenService      = game:GetService("TweenService")
+local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 
--- ── Build ScreenGui ────────────────────────────────────────────────────────
+-- ── Build root ScreenGui ────────────────────────────────────────────────────
 local gui = Instance.new("ScreenGui")
-gui.Name          = "GameHUD"
-gui.ResetOnSpawn  = false
-gui.IgnoreGuiInset = true
-gui.Parent        = player:WaitForChild("PlayerGui")
+gui.Name            = "GameHUD"
+gui.ResetOnSpawn    = false
+gui.IgnoreGuiInset  = true
+gui.DisplayOrder    = 5
+gui.Parent          = player:WaitForChild("PlayerGui")
 
-local function makeFrame(name, parent, size, pos, color, transparency)
+-- ── Helpers ─────────────────────────────────────────────────────────────────
+local function frame(name, parent, size, pos, bg, alpha)
     local f = Instance.new("Frame")
-    f.Name              = name
-    f.Size              = size
-    f.Position          = pos
-    f.BackgroundColor3  = color or Color3.new(0, 0, 0)
-    f.BackgroundTransparency = transparency or 0
-    f.BorderSizePixel   = 0
-    f.Parent            = parent
-    return f
+    f.Name = name; f.Size = size; f.Position = pos
+    f.BackgroundColor3 = bg or Color3.new(0,0,0)
+    f.BackgroundTransparency = alpha or 0; f.BorderSizePixel = 0
+    f.Parent = parent; return f
 end
-
-local function makeLabel(name, parent, size, pos, text, textColor, fontSize)
+local function label(name, parent, size, pos, text, col, sz, align)
     local l = Instance.new("TextLabel")
-    l.Name              = name
-    l.Size              = size
-    l.Position          = pos
-    l.Text              = text or ""
-    l.TextColor3        = textColor or Color3.new(1, 1, 1)
-    l.BackgroundTransparency = 1
-    l.Font              = Enum.Font.GothamBold
-    l.TextSize          = fontSize or 14
-    l.TextXAlignment    = Enum.TextXAlignment.Left
-    l.Parent            = parent
-    return l
+    l.Name = name; l.Size = size; l.Position = pos; l.Text = text or ""
+    l.TextColor3 = col or Color3.new(1,1,1)
+    l.BackgroundTransparency = 1; l.Font = Enum.Font.GothamBold
+    l.TextSize = sz or 14; l.BorderSizePixel = 0
+    l.TextXAlignment = align or Enum.TextXAlignment.Left
+    l.Parent = parent; return l
+end
+local function corner(parent, px)
+    local c = Instance.new("UICorner", parent); c.CornerRadius = UDim.new(0, px or 6); return c
 end
 
--- ── HP Bar ─────────────────────────────────────────────────────────────────
-local hpContainer = makeFrame("HPContainer", gui,
-    UDim2.new(0, 260, 0, 24),
-    UDim2.new(0, 16, 1, -52),
-    Color3.fromRGB(20, 20, 20), 0.3)
+-- ── HP Bar ──────────────────────────────────────────────────────────────────
+local hpContainer = frame("HPBar", gui,
+    UDim2.new(0, 280, 0, 22),
+    UDim2.new(0, 14, 1, -50),
+    Color3.fromRGB(15, 15, 20), 0.35)
+corner(hpContainer, 5)
 
-Instance.new("UICorner", hpContainer).CornerRadius = UDim.new(0, 6)
+local hpFill = frame("Fill", hpContainer, UDim2.new(1,0,1,0), UDim2.new(0,0,0,0),
+    Color3.fromRGB(60,220,60), 0)
+corner(hpFill, 5)
 
-local hpBar = makeFrame("HPBar", hpContainer,
-    UDim2.new(1, 0, 1, 0),
-    UDim2.new(0, 0, 0, 0),
-    Color3.fromRGB(60, 220, 60), 0)
-Instance.new("UICorner", hpBar).CornerRadius = UDim.new(0, 6)
+local shieldFill = frame("Shield", hpContainer, UDim2.new(0,0,1,0), UDim2.new(0,0,0,0),
+    Color3.fromRGB(80,160,255), 0)
+corner(shieldFill, 5)
 
-local shieldBar = makeFrame("ShieldBar", hpContainer,
-    UDim2.new(0, 0, 1, 0),
-    UDim2.new(0, 0, 0, 0),
-    Color3.fromRGB(80, 160, 255), 0)
-Instance.new("UICorner", shieldBar).CornerRadius = UDim.new(0, 6)
+local hpText = label("Text", hpContainer,
+    UDim2.new(1,0,1,0), UDim2.new(0,0,0,0),
+    "100 / 100", Color3.new(1,1,1), 12, Enum.TextXAlignment.Center)
 
-local hpLabel = makeLabel("HPLabel", hpContainer,
-    UDim2.new(1, 0, 1, 0), UDim2.new(0, 6, 0, 0),
-    "100 / 100", Color3.new(1,1,1), 13)
-hpLabel.TextXAlignment = Enum.TextXAlignment.Center
+-- ── Level / Score ────────────────────────────────────────────────────────────
+local infoBox = frame("Info", gui,
+    UDim2.new(0, 190, 0, 48),
+    UDim2.new(0.5, -95, 0, 8),
+    Color3.fromRGB(8, 8, 20), 0.45)
+corner(infoBox, 8)
 
--- ── Level / Score ──────────────────────────────────────────────────────────
-local infoFrame = makeFrame("InfoFrame", gui,
-    UDim2.new(0, 200, 0, 50),
-    UDim2.new(0.5, -100, 0, 10),
-    Color3.fromRGB(10, 10, 20), 0.45)
-Instance.new("UICorner", infoFrame).CornerRadius = UDim.new(0, 8)
+local lvlLabel   = label("Level", infoBox, UDim2.new(1,0,0.5,0), UDim2.new(0,0,0,0),
+    "LEVEL 1", Color3.fromRGB(255,220,80), 16, Enum.TextXAlignment.Center)
+local scoreLabel = label("Score", infoBox, UDim2.new(1,0,0.5,0), UDim2.new(0,0,0.5,0),
+    "SCORE: 0", Color3.fromRGB(190,190,210), 12, Enum.TextXAlignment.Center)
 
-local levelLabel = makeLabel("LevelLabel", infoFrame,
-    UDim2.new(1, 0, 0.5, 0), UDim2.new(0, 0, 0, 0),
-    "LEVEL 1", Color3.fromRGB(255, 220, 80), 16)
-levelLabel.TextXAlignment = Enum.TextXAlignment.Center
+-- ── Weapon ───────────────────────────────────────────────────────────────────
+local weapBox = frame("Weapon", gui,
+    UDim2.new(0, 170, 0, 38),
+    UDim2.new(1, -184, 1, -54),
+    Color3.fromRGB(8, 8, 20), 0.45)
+corner(weapBox, 8)
+local weapName = label("Name", weapBox, UDim2.new(1,-8,0.5,0), UDim2.new(0,8,0,0),
+    "Plasma Blaster", Color3.fromRGB(255,220,60), 13)
+local weapSub  = label("Sub", weapBox, UDim2.new(1,-8,0.5,0), UDim2.new(0,8,0.5,0),
+    "RANGED", Color3.fromRGB(150,150,160), 10)
 
-local scoreLabel = makeLabel("ScoreLabel", infoFrame,
-    UDim2.new(1, 0, 0.5, 0), UDim2.new(0, 0, 0.5, 0),
-    "SCORE: 0", Color3.fromRGB(200, 200, 200), 13)
-scoreLabel.TextXAlignment = Enum.TextXAlignment.Center
+-- ── Gravity indicator + cooldown radial ─────────────────────────────────────
+local gravBox = frame("GravBox", gui,
+    UDim2.new(0, 110, 0, 80),
+    UDim2.new(1, -126, 0.5, -40),
+    Color3.fromRGB(8,8,20), 0.45)
+corner(gravBox, 8)
 
--- ── Weapon indicator ───────────────────────────────────────────────────────
-local weaponFrame = makeFrame("WeaponFrame", gui,
-    UDim2.new(0, 160, 0, 40),
-    UDim2.new(1, -176, 1, -56),
-    Color3.fromRGB(10, 10, 20), 0.45)
-Instance.new("UICorner", weaponFrame).CornerRadius = UDim.new(0, 8)
+label("GTitle", gravBox, UDim2.new(1,0,0.3,0), UDim2.new(0,0,0,0),
+    "GRAVITY  [G]", Color3.fromRGB(130,130,150), 10, Enum.TextXAlignment.Center)
 
-local weaponLabel = makeLabel("WeaponLabel", weaponFrame,
-    UDim2.new(1, -8, 0.5, 0), UDim2.new(0, 8, 0, 0),
-    "Plasma Blaster", Color3.fromRGB(255, 220, 60), 13)
-weaponLabel.TextXAlignment = Enum.TextXAlignment.Left
+local gravDirLabel = label("GDir", gravBox, UDim2.new(1,0,0.4,0), UDim2.new(0,0,0.3,0),
+    "▼ DOWN", Color3.fromRGB(100,200,255), 15, Enum.TextXAlignment.Center)
 
-local weaponSub = makeLabel("WeaponSub", weaponFrame,
-    UDim2.new(1, -8, 0.5, 0), UDim2.new(0, 8, 0.5, 0),
-    "RANGED", Color3.fromRGB(160, 160, 160), 11)
+-- Cooldown bar (fills left-to-right as cooldown recharges)
+local cdBG = frame("CdBG", gravBox,
+    UDim2.new(0.85,0,0.2,0), UDim2.new(0.075,0,0.8,0),
+    Color3.fromRGB(30,30,40), 0.3)
+corner(cdBG, 3)
+local cdFill = frame("CdFill", cdBG,
+    UDim2.new(1,0,1,0), UDim2.new(0,0,0,0),
+    Color3.fromRGB(100,200,255), 0)
+corner(cdFill, 3)
 
--- ── Gravity indicator ──────────────────────────────────────────────────────
-local gravFrame = makeFrame("GravFrame", gui,
-    UDim2.new(0, 100, 0, 70),
-    UDim2.new(1, -116, 0.5, -35),
-    Color3.fromRGB(10, 10, 20), 0.45)
-Instance.new("UICorner", gravFrame).CornerRadius = UDim.new(0, 8)
-
-local gravTitle = makeLabel("GravTitle", gravFrame,
-    UDim2.new(1,0,0.35,0), UDim2.new(0,0,0,0),
-    "GRAVITY", Color3.fromRGB(140,140,160), 11)
-gravTitle.TextXAlignment = Enum.TextXAlignment.Center
-
--- Direction arrows (N/S/E/W = Up/Down/Left/Right)
-local gravArrow = makeLabel("GravArrow", gravFrame,
-    UDim2.new(1,0,0.65,0), UDim2.new(0,0,0.35,0),
-    "▼ DOWN", Color3.fromRGB(100, 200, 255), 15)
-gravArrow.TextXAlignment = Enum.TextXAlignment.Center
-
--- Cooldown overlay (dims when on cooldown)
-local gravCDBar = makeFrame("CooldownBar", gravFrame,
-    UDim2.new(1,0,0.08,0), UDim2.new(0,0,0.92,0),
-    Color3.fromRGB(100, 200, 255), 0)
-gravCDBar.BackgroundTransparency = 1  -- shown as line when cooling down
-
--- ── Passive icons ──────────────────────────────────────────────────────────
-local passiveFrame = makeFrame("Passives", gui,
-    UDim2.new(0, 300, 0, 28),
-    UDim2.new(0, 16, 1, -80),
-    Color3.new(0,0,0), 1)  -- transparent container
-
-local passiveList = Instance.new("UIListLayout", passiveFrame)
-passiveList.FillDirection = Enum.FillDirection.Horizontal
-passiveList.Padding       = UDim.new(0, 4)
-
--- ── Damage flash ───────────────────────────────────────────────────────────
-local dmgFlash = makeFrame("DamageFlash", gui,
-    UDim2.new(1, 0, 1, 0),
-    UDim2.new(0, 0, 0, 0),
-    Color3.fromRGB(255, 30, 30), 1)
-dmgFlash.ZIndex = 10
-
--- ── Banner (level start / level complete) ─────────────────────────────────
-local banner = makeFrame("Banner", gui,
-    UDim2.new(0, 500, 0, 70),
-    UDim2.new(0.5, -250, 0.3, 0),
-    Color3.fromRGB(10, 10, 30), 0.3)
-Instance.new("UICorner", banner).CornerRadius = UDim.new(0, 10)
-banner.Visible = false
-
-local bannerMain = makeLabel("Main", banner,
-    UDim2.new(1,0,0.6,0), UDim2.new(0,0,0,0),
-    "", Color3.fromRGB(255, 255, 100), 22)
-bannerMain.TextXAlignment = Enum.TextXAlignment.Center
-
-local bannerSub = makeLabel("Sub", banner,
-    UDim2.new(1,0,0.4,0), UDim2.new(0,0,0.6,0),
-    "", Color3.fromRGB(180, 180, 220), 14)
-bannerSub.TextXAlignment = Enum.TextXAlignment.Center
-
-local function showBanner(main, sub, duration)
-    bannerMain.Text = main
-    bannerSub.Text  = sub or ""
-    banner.Visible  = true
-    banner.Position = UDim2.new(0.5, -250, 0.3, -40)
-    banner.BackgroundTransparency = 1
-    bannerMain.TextTransparency = 1
-    bannerSub.TextTransparency  = 1
-
-    TweenService:Create(banner, TweenInfo.new(0.4), {
-        Position = UDim2.new(0.5, -250, 0.3, 0),
-        BackgroundTransparency = 0.3,
-    }):Play()
-    TweenService:Create(bannerMain, TweenInfo.new(0.4), { TextTransparency = 0 }):Play()
-    TweenService:Create(bannerSub,  TweenInfo.new(0.4), { TextTransparency = 0 }):Play()
-
-    task.delay(duration or 2.5, function()
-        TweenService:Create(banner, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-        TweenService:Create(bannerMain, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
-        TweenService:Create(bannerSub,  TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
-        task.wait(0.45)
-        banner.Visible = false
-    end)
-end
-
--- ── Weapon name lookup ─────────────────────────────────────────────────────
-local weaponNames = {
-    blaster          = { name = "Plasma Blaster",    sub = "RANGED" },
-    shotgun          = { name = "Scatter Cannon",     sub = "RANGED" },
-    sniper           = { name = "Rail Rifle",         sub = "RANGED · PIERCE" },
-    sword            = { name = "Plasma Blade",       sub = "MELEE" },
-    flamethrower     = { name = "Inferno Torch",      sub = "RANGED · FIRE" },
-    grenade_launcher = { name = "Grenade Launcher",   sub = "RANGED · AOE" },
-}
-
-local gravNames = {
+local GRAV_NAMES = {
     [tostring(Vector3.new(0,-1,0))] = "▼ DOWN",
     [tostring(Vector3.new(0, 1,0))] = "▲ UP",
     [tostring(Vector3.new(-1,0,0))] = "◄ LEFT",
     [tostring(Vector3.new( 1,0,0))] = "► RIGHT",
 }
 
--- ── Update functions ───────────────────────────────────────────────────────
-local function updateHPBar(hp, maxHp, shield)
-    local ratio = math.max(0, hp / maxHp)
-    TweenService:Create(hpBar, TweenInfo.new(0.15), {
-        Size = UDim2.new(ratio, 0, 1, 0),
-        BackgroundColor3 = Color3.fromRGB(
-            math.floor(60 + (220-60) * (1-ratio)),
-            math.floor(220 - (220-60) * (1-ratio)),
-            60
-        ),
-    }):Play()
+-- Update cooldown bar every frame
+RunService.RenderStepped:Connect(function()
+    local last = player:GetAttribute("LastGravSwitch") or 0
+    local cd   = player:GetAttribute("GravCooldown")   or 1.5
+    local prog = math.min(1, (tick() - last) / cd)
+    cdFill.Size = UDim2.new(prog, 0, 1, 0)
+    cdFill.BackgroundColor3 = prog >= 1
+        and Color3.fromRGB(100, 200, 255)
+        or  Color3.fromRGB(60, 80, 140)
 
-    local shieldRatio = math.min(shield / maxHp, 1)
-    shieldBar.Size = UDim2.new(shieldRatio, 0, 1, 0)
-    hpLabel.Text   = math.ceil(hp) .. " / " .. maxHp
-                     .. (shield > 0 and ("  🛡 " .. math.ceil(shield)) or "")
-end
-
-local function updateWeapon(weaponId)
-    local w = weaponNames[weaponId] or { name = weaponId, sub = "" }
-    weaponLabel.Text = w.name
-    weaponSub.Text   = w.sub
-end
-
-local function rebuildPassives(passiveList, passives)
-    for _, c in ipairs(passiveList:GetChildren()) do
-        if c:IsA("Frame") then c:Destroy() end
-    end
-    for _, pid in ipairs(passives) do
-        local icon = makeFrame(pid, passiveList,
-            UDim2.new(0, 24, 0, 24),
-            UDim2.new(0, 0, 0, 0),
-            Color3.fromRGB(40, 40, 60), 0.2)
-        Instance.new("UICorner", icon).CornerRadius = UDim.new(0, 4)
-        local lbl = Instance.new("TextLabel", icon)
-        lbl.Size = UDim2.new(1,0,1,0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = string.upper(string.sub(pid, 1, 2))
-        lbl.TextColor3 = Color3.fromRGB(200, 200, 255)
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 9
-        lbl.TextXAlignment = Enum.TextXAlignment.Center
-    end
-end
-
--- ── Event listeners ────────────────────────────────────────────────────────
-local Events = ReplicatedStorage:WaitForChild("Events")
-
-Events:WaitForChild("UpdateHUD").OnClientEvent:Connect(function(data)
-    if data.hp and data.maxHp then
-        updateHPBar(data.hp, data.maxHp, data.shield or 0)
-    end
-    if data.level then
-        levelLabel.Text = "LEVEL " .. data.level
-    end
-    if data.score then
-        scoreLabel.Text = "SCORE: " .. data.score
-    end
-    if data.weapon then
-        updateWeapon(data.weapon)
-    end
-    if data.passives then
-        rebuildPassives(passiveFrame, data.passives)
-    end
-end)
-
-Events:WaitForChild("PlayerDamaged").OnClientEvent:Connect(function(data)
-    if data.isDot then return end  -- no flash for DoT ticks
-    dmgFlash.BackgroundTransparency = 0.5
-    TweenService:Create(dmgFlash, TweenInfo.new(0.35), { BackgroundTransparency = 1 }):Play()
-end)
-
-Events:WaitForChild("LevelStart").OnClientEvent:Connect(function(data)
-    if data.zone then
-        showBanner("LEVEL " .. (data.level or "?"), data.zone)
-    end
-    if data.portalOpen then
-        showBanner("ALL CLEAR", "Reach the portal →", 2)
-    end
-end)
-
-Events:WaitForChild("LevelComplete").OnClientEvent:Connect(function(data)
-    showBanner("LEVEL COMPLETE", "Score: " .. (data.score or 0))
-end)
-
-Events:WaitForChild("BossSpawned").OnClientEvent:Connect(function(data)
-    showBanner("⚠ BOSS", data.name .. "\n" .. (data.subtitle or ""), 3)
-end)
-
-Events:WaitForChild("BossDefeated").OnClientEvent:Connect(function(data)
-    showBanner("BOSS DEFEATED", "Score: " .. (data.score or 0))
-end)
-
-Events:WaitForChild("GameOver").OnClientEvent:Connect(function(data)
-    showBanner("YOU DIED",
-        "Level " .. (data.level or 1) .. "  ·  Score: " .. (data.score or 0),
-        5)
-end)
-
--- Gravity arrow update (hook from CharacterController via a BindableEvent would be ideal;
--- for now we poll the grav index via a shared attribute on the character)
-task.spawn(function()
-    while true do
-        task.wait(0.1)
-        local char = player.Character
-        if char then
-            local root = char:FindFirstChild("HumanoidRootPart")
-            if root then
-                -- Read gravity direction from the VectorForce if present
-                local gf = root:FindFirstChild("CustomGravity")
-                if gf then
-                    -- Approximate current direction from force
-                    local f    = gf.Force
-                    local mass = 1  -- approximate
-                    -- direction is (Force - upCancel) / GRAVITY_MAG / mass
-                    -- Simpler: infer from which component dominates
-                    local dirs = {
-                        { v = Vector3.new(0,-1,0), n = "▼ DOWN"  },
-                        { v = Vector3.new(0, 1,0), n = "▲ UP"    },
-                        { v = Vector3.new(-1,0,0), n = "◄ LEFT"  },
-                        { v = Vector3.new( 1,0,0), n = "► RIGHT" },
-                    }
-                    -- Actual direction: total force points in grav direction + cancel
-                    -- Force = (0, Grav*m, 0) + gravDir*Grav*m
-                    -- When gravDir=(0,-1,0): Force=(0,0,0)
-                    -- When gravDir=(0,1,0): Force=(0,2Grav*m,0)
-                    -- When gravDir=(-1,0,0): Force=(0,Grav*m,0)+(-Grav*m,0,0)
-                    -- Dominant non-cancel axis = gravDir
-                    local best, bestDot = dirs[1], -2
-                    for _, d in ipairs(dirs) do
-                        local dot = f:Dot(d.v)
-                        if dot > bestDot then best = d; bestDot = dot end
-                    end
-                    gravArrow.Text = best.n
+    -- Infer current gravity from VectorForce on character
+    local char = player.Character
+    if char then
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local gf = root:FindFirstChild("CustomGravity")
+            if gf then
+                local dirs = {
+                    { v = Vector3.new(0,-1,0), n = "▼ DOWN"  },
+                    { v = Vector3.new(0, 1,0), n = "▲ UP"    },
+                    { v = Vector3.new(-1,0,0), n = "◄ LEFT"  },
+                    { v = Vector3.new( 1,0,0), n = "► RIGHT" },
+                }
+                local best, bestDot = dirs[1], -2
+                for _, d in ipairs(dirs) do
+                    local dot = gf.Force:Dot(d.v)
+                    if dot > bestDot then best = d; bestDot = dot end
                 end
+                gravDirLabel.Text = best.n
             end
         end
     end
+end)
+
+-- ── Passive icons ────────────────────────────────────────────────────────────
+local passivesRow = frame("Passives", gui,
+    UDim2.new(0, 300, 0, 26),
+    UDim2.new(0, 14, 1, -80),
+    Color3.new(0,0,0), 1)
+local passiveLayout = Instance.new("UIListLayout", passivesRow)
+passiveLayout.FillDirection = Enum.FillDirection.Horizontal
+passiveLayout.Padding = UDim.new(0, 3)
+
+-- ── Combo display ────────────────────────────────────────────────────────────
+local comboFrame = frame("Combo", gui,
+    UDim2.new(0, 200, 0, 50),
+    UDim2.new(0.5, -100, 0.62, 0),
+    Color3.new(0,0,0), 1)
+comboFrame.Visible = false
+
+local comboLabel = label("ComboText", comboFrame,
+    UDim2.new(1,0,0.6,0), UDim2.new(0,0,0,0),
+    "×5 COMBO", Color3.fromRGB(255,200,40), 28, Enum.TextXAlignment.Center)
+
+local multLabel = label("MultText", comboFrame,
+    UDim2.new(1,0,0.4,0), UDim2.new(0,0,0.6,0),
+    "2.0× SCORE", Color3.fromRGB(255,160,60), 13, Enum.TextXAlignment.Center)
+
+-- ── Boss HP bar ──────────────────────────────────────────────────────────────
+local bossPanel = frame("BossPanel", gui,
+    UDim2.new(0, 500, 0, 50),
+    UDim2.new(0.5, -250, 0, 10),
+    Color3.fromRGB(8,8,20), 0.4)
+corner(bossPanel, 8)
+bossPanel.Visible = false
+
+local bossNameLabel = label("BossName", bossPanel,
+    UDim2.new(1,0,0.45,0), UDim2.new(0,0,0,0),
+    "BOSS", Color3.fromRGB(255,80,80), 14, Enum.TextXAlignment.Center)
+
+local bossBarBG = frame("BarBG", bossPanel,
+    UDim2.new(0.92,0,0.35,0), UDim2.new(0.04,0,0.55,0),
+    Color3.fromRGB(30,10,10), 0.2)
+corner(bossBarBG, 4)
+
+local bossBar = frame("Bar", bossBarBG,
+    UDim2.new(1,0,1,0), UDim2.new(0,0,0,0),
+    Color3.fromRGB(220,40,40), 0)
+corner(bossBar, 4)
+
+local bossHPLabel = label("HPNum", bossBarBG,
+    UDim2.new(1,0,1,0), UDim2.new(0,0,0,0),
+    "", Color3.new(1,1,1), 11, Enum.TextXAlignment.Center)
+
+-- ── Damage flash overlay ─────────────────────────────────────────────────────
+local dmgFlash = frame("DamageFlash", gui,
+    UDim2.new(1,0,1,0), UDim2.new(0,0,0,0),
+    Color3.fromRGB(255,30,30), 1)
+dmgFlash.ZIndex = 18
+
+-- ── Heal flash overlay ───────────────────────────────────────────────────────
+local healFlash = frame("HealFlash", gui,
+    UDim2.new(1,0,1,0), UDim2.new(0,0,0,0),
+    Color3.fromRGB(60,255,120), 1)
+healFlash.ZIndex = 17
+
+-- ── Banner (level start / zone name) ─────────────────────────────────────────
+local banner = frame("Banner", gui,
+    UDim2.new(0, 520, 0, 68),
+    UDim2.new(0.5,-260, 0.28, 0),
+    Color3.fromRGB(8,8,28), 0.3)
+corner(banner, 10)
+banner.Visible = false
+
+local bannerMain = label("Main", banner, UDim2.new(1,0,0.6,0), UDim2.new(0,0,0,0),
+    "", Color3.fromRGB(255,255,100), 24, Enum.TextXAlignment.Center)
+local bannerSub  = label("Sub", banner, UDim2.new(1,0,0.4,0), UDim2.new(0,0,0.6,0),
+    "", Color3.fromRGB(180,180,220), 14, Enum.TextXAlignment.Center)
+
+local function showBanner(main, sub, duration)
+    bannerMain.Text = main; bannerSub.Text = sub or ""
+    banner.Visible = true
+    banner.BackgroundTransparency = 1; bannerMain.TextTransparency = 1; bannerSub.TextTransparency = 1
+    TweenService:Create(banner, TweenInfo.new(0.35), { BackgroundTransparency = 0.3 }):Play()
+    TweenService:Create(bannerMain, TweenInfo.new(0.35), { TextTransparency = 0 }):Play()
+    TweenService:Create(bannerSub,  TweenInfo.new(0.35), { TextTransparency = 0 }):Play()
+    task.delay(duration or 2.5, function()
+        TweenService:Create(banner, TweenInfo.new(0.35), { BackgroundTransparency = 1 }):Play()
+        TweenService:Create(bannerMain, TweenInfo.new(0.35), { TextTransparency = 1 }):Play()
+        TweenService:Create(bannerSub,  TweenInfo.new(0.35), { TextTransparency = 1 }):Play()
+        task.wait(0.4); banner.Visible = false
+    end)
+end
+
+-- ── Weapon name table ────────────────────────────────────────────────────────
+local WEAPON_NAMES = {
+    blaster          = { n = "Plasma Blaster",  s = "RANGED" },
+    shotgun          = { n = "Scatter Cannon",  s = "RANGED" },
+    sniper           = { n = "Rail Rifle",       s = "RANGED · PIERCE" },
+    sword            = { n = "Plasma Blade",     s = "MELEE" },
+    flamethrower     = { n = "Inferno Torch",    s = "RANGED · FIRE" },
+    grenade_launcher = { n = "Grenade Launcher", s = "RANGED · AOE" },
+}
+
+-- ── Update functions ─────────────────────────────────────────────────────────
+local function updateHP(hp, maxHp, shield)
+    local ratio = math.max(0, hp / maxHp)
+    TweenService:Create(hpFill, TweenInfo.new(0.14), {
+        Size = UDim2.new(ratio, 0, 1, 0),
+        BackgroundColor3 = Color3.fromRGB(
+            math.floor(60  + (220-60)  * (1-ratio)),
+            math.floor(220 - (220-60) * (1-ratio)), 60),
+    }):Play()
+    local shRatio = math.min((shield or 0) / maxHp, 1)
+    shieldFill.Size = UDim2.new(shRatio, 0, 1, 0)
+    hpText.Text = math.ceil(hp) .. " / " .. maxHp
+                  .. (shield > 0 and (" · ⬡" .. math.ceil(shield)) or "")
+end
+
+local function rebuildPassives(passives)
+    for _, c in ipairs(passivesRow:GetChildren()) do
+        if c:IsA("Frame") then c:Destroy() end
+    end
+    for _, pid in ipairs(passives) do
+        local ic = Instance.new("Frame", passivesRow)
+        ic.Name = pid; ic.Size = UDim2.new(0,24,0,24)
+        ic.BackgroundColor3 = Color3.fromRGB(30,30,55)
+        ic.BackgroundTransparency = 0.25; ic.BorderSizePixel = 0
+        corner(ic, 4)
+        local l2 = Instance.new("TextLabel", ic)
+        l2.Size = UDim2.new(1,0,1,0); l2.BackgroundTransparency = 1
+        l2.Text = string.upper(string.sub(pid,1,2))
+        l2.TextColor3 = Color3.fromRGB(180,200,255)
+        l2.Font = Enum.Font.GothamBold; l2.TextSize = 9
+        l2.TextXAlignment = Enum.TextXAlignment.Center
+    end
+end
+
+-- ── Event wiring ─────────────────────────────────────────────────────────────
+local Events = ReplicatedStorage:WaitForChild("Events")
+
+Events:WaitForChild("UpdateHUD").OnClientEvent:Connect(function(d)
+    if d.hp and d.maxHp then updateHP(d.hp, d.maxHp, d.shield or 0) end
+    if d.level then lvlLabel.Text = "LEVEL " .. d.level end
+    if d.score then scoreLabel.Text = "SCORE: " .. d.score end
+    if d.weapon then
+        local w = WEAPON_NAMES[d.weapon] or { n = d.weapon, s = "" }
+        weapName.Text = w.n; weapSub.Text = w.s
+    end
+    if d.passives then rebuildPassives(d.passives) end
+end)
+
+Events:WaitForChild("PlayerDamaged").OnClientEvent:Connect(function(d)
+    if d.isDot then return end
+    dmgFlash.BackgroundTransparency = 0.5
+    TweenService:Create(dmgFlash, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+end)
+
+Events:WaitForChild("HealPickup").OnClientEvent:Connect(function(d)
+    if d.hp and d.maxHp then updateHP(d.hp, d.maxHp, 0) end
+    healFlash.BackgroundTransparency = 0.65
+    TweenService:Create(healFlash, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
+    showBanner("+" .. (d.amount or 20) .. " HP", "", 1.2)
+end)
+
+Events:WaitForChild("ComboUpdate").OnClientEvent:Connect(function(d)
+    if (d.combo or 0) <= 1 then
+        TweenService:Create(comboFrame, TweenInfo.new(0.2), {}):Play()
+        comboFrame.Visible = false
+    else
+        comboFrame.Visible = true
+        comboLabel.Text = "×" .. d.combo .. " COMBO"
+        multLabel.Text  = string.format("%.1f× SCORE", d.mult or 1)
+        -- Pop animation
+        TweenService:Create(comboLabel, TweenInfo.new(0.08), { TextSize = 32 }):Play()
+        task.delay(0.09, function()
+            TweenService:Create(comboLabel, TweenInfo.new(0.15), { TextSize = 28 }):Play()
+        end)
+        -- Color by tier
+        local col = d.mult >= 3 and Color3.fromRGB(255,80,80)
+                 or d.mult >= 2 and Color3.fromRGB(255,160,40)
+                 or Color3.fromRGB(255,200,40)
+        comboLabel.TextColor3 = col
+        multLabel.TextColor3  = col
+    end
+end)
+
+Events:WaitForChild("LevelStart").OnClientEvent:Connect(function(d)
+    if d.zone   then showBanner("LEVEL " .. (d.level or "?"), d.zone) end
+    if d.portalOpen then showBanner("ALL CLEAR", "Reach the portal!", 2) end
+end)
+
+Events:WaitForChild("LevelComplete").OnClientEvent:Connect(function(d)
+    showBanner("LEVEL COMPLETE", "Score: " .. (d.score or 0))
+end)
+
+Events:WaitForChild("BossSpawned").OnClientEvent:Connect(function(d)
+    bossNameLabel.Text = (d.name or "BOSS")
+    bossBar.Size = UDim2.new(1, 0, 1, 0)
+    bossHPLabel.Text = ""
+    bossPanel.Visible = true
+    showBanner("⚠ BOSS", (d.name or "") .. "\n" .. (d.subtitle or ""), 3)
+end)
+
+Events:WaitForChild("BossHPUpdate").OnClientEvent:Connect(function(d)
+    local ratio = math.max(0, d.ratio or 0)
+    TweenService:Create(bossBar, TweenInfo.new(0.15), {
+        Size = UDim2.new(ratio, 0, 1, 0),
+        BackgroundColor3 = ratio > 0.5 and Color3.fromRGB(220,40,40)
+                        or ratio > 0.25 and Color3.fromRGB(255,120,20)
+                        or Color3.fromRGB(255,220,20),
+    }):Play()
+    if d.hp then
+        bossHPLabel.Text = math.ceil(d.hp) .. " / " .. (d.maxHp or 0)
+    end
+end)
+
+Events:WaitForChild("BossPhaseWarning").OnClientEvent:Connect(function(d)
+    showBanner("PHASE " .. (d.phase or 2) .. "!", "Boss enraged!", 2)
+    -- Red flash
+    dmgFlash.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+    dmgFlash.BackgroundTransparency = 0.3
+    TweenService:Create(dmgFlash, TweenInfo.new(0.6), { BackgroundTransparency = 1 }):Play()
+    task.delay(0.7, function() dmgFlash.BackgroundColor3 = Color3.fromRGB(255,30,30) end)
+end)
+
+Events:WaitForChild("BossDefeated").OnClientEvent:Connect(function(d)
+    bossPanel.Visible = false
+    showBanner("BOSS DEFEATED!", "Score: " .. (d.score or 0))
+end)
+
+Events:WaitForChild("GameOver").OnClientEvent:Connect(function()
+    bossPanel.Visible  = false
+    comboFrame.Visible = false
 end)
 
 print("[HUD] Loaded.")

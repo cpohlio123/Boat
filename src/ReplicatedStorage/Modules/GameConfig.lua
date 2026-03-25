@@ -37,6 +37,29 @@ local GameConfig = {
     -- Enemy
     ENEMY_SPAWN_CHANCE = 0.14,  -- per floor section
 
+    -- Combo system
+    COMBO_WINDOW = 3.0,         -- seconds between kills to keep combo alive
+    COMBO_TIERS  = {            -- min kills → score multiplier
+        { kills = 2,  mult = 1.5  },
+        { kills = 5,  mult = 2.0  },
+        { kills = 10, mult = 3.0  },
+        { kills = 20, mult = 5.0  },
+    },
+
+    -- HP drops
+    HP_DROP_CHANCE  = 0.28,     -- chance an enemy drops an HP orb on death
+    HP_DROP_AMOUNT  = 20,       -- HP restored by picking up an orb
+
+    -- Level hazards / dynamics
+    HAZARD_CHANCE           = 0.09,   -- chance a floor tile is a hazard
+    HAZARD_DAMAGE           = 8,      -- damage per 0.5s of standing on hazard
+    MOVING_PLATFORM_CHANCE  = 0.18,   -- chance a platform is a mover
+    MOVER_SPEED             = 5,      -- studs per second travel speed
+
+    -- Screen shake (applied client-side on damage)
+    SHAKE_DURATION  = 0.45,
+    SHAKE_INTENSITY = 0.45,
+
     -- Zone themes
     ZONES = {
         {
