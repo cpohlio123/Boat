@@ -2,6 +2,7 @@
 -- Stats and behaviour profiles for all enemy types
 
 local EnemyData = {
+    -- ── Original enemies ──────────────────────────────────────────────────────
     Scout = {
         displayName    = "Scout Bot",
         maxHp          = 45,
@@ -26,7 +27,7 @@ local EnemyData = {
         attackCooldown = 1.6,
         projectileSpeed = 70,
         detectionRange = 50,
-        floats         = true,   -- hovers 6 studs above its spawn surface
+        floats         = true,
         hoverHeight    = 6,
         color          = Color3.fromRGB(160, 210, 255),
         bodySize       = Vector3.new(3, 1.5, 3),
@@ -51,7 +52,7 @@ local EnemyData = {
         speed          = 7,
         attackType     = "ranged",
         attackDamage   = 12,
-        dotDamage      = 6,    -- damage per second for 3s
+        dotDamage      = 6,
         dotDuration    = 3,
         attackRange    = 28,
         attackCooldown = 2.5,
@@ -85,8 +86,143 @@ local EnemyData = {
         detectionRange = 24,
         color          = Color3.fromRGB(180, 88, 28),
         bodySize       = Vector3.new(4, 5, 4),
-        armorReduction = 0.3,  -- 30% damage reduction
+        armorReduction = 0.30,
         score          = 120,
+    },
+
+    -- ── New enemies ───────────────────────────────────────────────────────────
+
+    -- Long-range glass cannon; nearly stationary when targeting
+    SniperBot = {
+        displayName    = "Sniper Bot",
+        maxHp          = 40,
+        speed          = 4,
+        attackType     = "ranged",
+        attackDamage   = 50,
+        attackRange    = 65,
+        attackCooldown = 4.0,
+        projectileSpeed = 130,
+        detectionRange = 75,
+        color          = Color3.fromRGB(130, 165, 210),
+        bodySize       = Vector3.new(2, 3.5, 2),
+        score          = 95,
+    },
+
+    -- Fast assassin that teleports toward its prey
+    Phantom = {
+        displayName     = "Phantom",
+        maxHp           = 38,
+        speed           = 24,
+        attackType      = "melee",
+        attackDamage    = 22,
+        attackRange     = 4,
+        attackCooldown  = 0.7,
+        detectionRange  = 48,
+        teleports       = true,
+        teleportCooldown = 3.5,
+        teleportRange   = 18,
+        color           = Color3.fromRGB(160, 90, 220),
+        bodySize        = Vector3.new(1.5, 3, 1.5),
+        score           = 90,
+    },
+
+    -- Melee charger; speed and damage multiply when HP < 50%
+    Berserker = {
+        displayName    = "Berserker",
+        maxHp          = 80,
+        speed          = 13,
+        rageSpeed      = 38,
+        enrageBelow    = 0.5,
+        attackType     = "melee",
+        attackDamage   = 26,
+        attackRange    = 5,
+        attackCooldown = 0.75,
+        detectionRange = 38,
+        color          = Color3.fromRGB(200, 55, 30),
+        bodySize       = Vector3.new(2.5, 3.5, 2.5),
+        score          = 95,
+    },
+
+    -- Floating drone that lobs slow explosive shots
+    Bomber = {
+        displayName    = "Bomber Bot",
+        maxHp          = 60,
+        speed          = 7,
+        attackType     = "ranged",
+        attackDamage   = 32,
+        attackRange    = 32,
+        attackCooldown = 3.2,
+        projectileSpeed = 32,
+        detectionRange = 46,
+        floats         = true,
+        hoverHeight    = 9,
+        color          = Color3.fromRGB(230, 160, 25),
+        bodySize       = Vector3.new(3, 2, 3),
+        score          = 105,
+    },
+
+    -- Bulky melee unit with heavy ranged armor; punishes facetanking
+    Shielder = {
+        displayName    = "Shielder",
+        maxHp          = 130,
+        speed          = 7,
+        attackType     = "melee",
+        attackDamage   = 32,
+        attackRange    = 7,
+        attackCooldown = 1.5,
+        detectionRange = 26,
+        armorReduction = 0.60,
+        color          = Color3.fromRGB(90, 120, 180),
+        bodySize       = Vector3.new(3, 4.5, 1.5),
+        score          = 115,
+    },
+
+    -- Stationary rapid-fire emplacement; does not chase player
+    Turret = {
+        displayName    = "Defense Turret",
+        maxHp          = 95,
+        speed          = 0,
+        attackType     = "ranged",
+        attackDamage   = 14,
+        attackRange    = 52,
+        attackCooldown = 0.75,
+        projectileSpeed = 95,
+        detectionRange = 58,
+        isStationary   = true,
+        color          = Color3.fromRGB(75, 80, 100),
+        bodySize       = Vector3.new(3, 2.5, 3),
+        score          = 75,
+    },
+
+    -- Tiny, extremely fast swarmer; always comes in numbers
+    Swarm = {
+        displayName    = "Void Swarm",
+        maxHp          = 18,
+        speed          = 30,
+        attackType     = "melee",
+        attackDamage   = 8,
+        attackRange    = 3,
+        attackCooldown = 0.5,
+        detectionRange = 52,
+        color          = Color3.fromRGB(30, 185, 95),
+        bodySize       = Vector3.new(1.2, 1.2, 1.2),
+        score          = 25,
+    },
+
+    -- Massive armored brute; very slow but hits like a freight train
+    Juggernaut = {
+        displayName    = "Juggernaut",
+        maxHp          = 340,
+        speed          = 4,
+        attackType     = "melee",
+        attackDamage   = 60,
+        attackRange    = 9,
+        attackCooldown = 2.6,
+        detectionRange = 22,
+        armorReduction = 0.45,
+        color          = Color3.fromRGB(130, 55, 18),
+        bodySize       = Vector3.new(5.5, 6.5, 5.5),
+        score          = 200,
     },
 }
 
