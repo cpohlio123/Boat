@@ -39,6 +39,8 @@ local GameOverEvent        = makeEvent("GameOver")
 local UpdateHUD            = makeEvent("UpdateHUD")
 local ComboUpdate          = makeEvent("ComboUpdate")
 local HealPickup           = makeEvent("HealPickup")
+local KillFeed             = makeEvent("KillFeed")
+local SetDifficulty        = makeEvent("SetDifficulty")
 
 -- ── States ─────────────────────────────────────────────────────────────────
 local STATE = { IDLE = "idle", PLAYING = "playing", BOSS = "boss", UPGRADES = "upgrades", DEAD = "dead" }
@@ -74,6 +76,10 @@ local function newPlayerState(player)
         totalKills      = 0,
         damageDealt     = 0,
         runStartTime    = tick(),
+        -- Difficulty
+        difficulty      = "normal",
+        enemyHpMult     = 1.0,
+        enemyDmgMult    = 1.0,
     }
 end
 
@@ -226,7 +232,11 @@ local function startLevel(ps)
         BossHPUpdate:FireClient(player, { hp = boss.hp, maxHp = boss.maxHp, ratio = 1.0 })
     else
         ps.state = STATE.PLAYING
-        EnemyManager.spawnEnemies(ps, enemySpawns, levelFolder)
+        EnemyManager.spawnEnemies(ps, enemySpawns, levelFolder, {
+            level        = ps.level,
+            enemyHpMult  = ps.enemyHpMult,
+            enemyDmgMult = ps.enemyDmgMult,
+        })
         LevelStart:FireClient(player, { level = ps.level, zone = zone.name, isBoss = false })
     end
 
@@ -288,6 +298,12 @@ DamageEnemy.OnServerEvent:Connect(function(player, enemyId, damage, damageType)
             ps.hp = math.min(ps.hp + ps.killHeal, ps.maxHp)
         end
         updateCombo(ps, score or 0)
+        -- Kill feed
+        KillFeed:FireClient(player, {
+            name    = EnemyManager.getEnemyName(enemyId),
+            isElite = EnemyManager.wasElite(enemyId),
+            score   = math.floor((score or 0) * ps.comboMult),
+        })
         sendHUD(ps)
 
         if ps.state == STATE.PLAYING and EnemyManager.allEnemiesDefeated(ps) then
@@ -378,6 +394,22 @@ EnemyManager.onHPPickup = function(ps)
     HealPickup:FireClient(ps.player, { amount = amt, hp = ps.hp, maxHp = ps.maxHp })
     sendHUD(ps)
 end
+
+-- Difficulty selection (fires before first level)
+local DIFF = {
+    easy   = { enemyHpMult = 0.70, enemyDmgMult = 0.70 },
+    normal = { enemyHpMult = 1.00, enemyDmgMult = 1.00 },
+    hard   = { enemyHpMult = 1.45, enemyDmgMult = 1.45 },
+}
+SetDifficulty.OnServerEvent:Connect(function(player, key)
+    local ps = playerStates[player.UserId]
+    if not ps or ps.level > 1 then return end  -- only before run starts
+    local d = DIFF[key] or DIFF.normal
+    ps.difficulty    = key
+    ps.enemyHpMult   = d.enemyHpMult
+    ps.enemyDmgMult  = d.enemyDmgMult
+    startLevel(ps)
+end)
 
 -- Pass the hazard callback through to the level generator
 LevelGenerator.onHazardDamage = function(player, damage)

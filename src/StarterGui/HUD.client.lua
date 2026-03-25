@@ -144,6 +144,121 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
+-- ── Level progress bar ───────────────────────────────────────────────────────
+local progressBG = frame("ProgressBG", gui,
+    UDim2.new(0, 280, 0, 8),
+    UDim2.new(0, 14, 1, -60),
+    Color3.fromRGB(20, 20, 35), 0.3)
+corner(progressBG, 4)
+
+local progressFill = frame("Fill", progressBG, UDim2.new(0, 0, 1, 0), UDim2.new(0,0,0,0),
+    Color3.fromRGB(100, 200, 255), 0)
+corner(progressFill, 4)
+
+local progressLabel = label("ProgressLbl", gui,
+    UDim2.new(0, 280, 0, 14),
+    UDim2.new(0, 14, 1, -73),
+    "Progress", Color3.fromRGB(130, 130, 160), 10)
+
+local _levelSections = 30
+local _sectionDepth  = 10
+local _levelStartZ   = 0
+
+-- ── Dash cooldown indicator ───────────────────────────────────────────────────
+local dashBox = frame("DashBox", gui,
+    UDim2.new(0, 110, 0, 46),
+    UDim2.new(1, -126, 0.5, 42),
+    Color3.fromRGB(8,8,20), 0.45)
+corner(dashBox, 8)
+
+label("DTitle", dashBox, UDim2.new(1,0,0.35,0), UDim2.new(0,0,0,0),
+    "DASH  [Shift]", Color3.fromRGB(130,130,150), 10, Enum.TextXAlignment.Center)
+
+local dashCdBG = frame("DashCdBG", dashBox,
+    UDim2.new(0.85,0,0.28,0), UDim2.new(0.075,0,0.65,0),
+    Color3.fromRGB(30,30,40), 0.3)
+corner(dashCdBG, 3)
+local dashCdFill = frame("DashCdFill", dashCdBG,
+    UDim2.new(1,0,1,0), UDim2.new(0,0,0,0),
+    Color3.fromRGB(120,180,255), 0)
+corner(dashCdFill, 3)
+
+-- Poll dash cooldown
+RunService.RenderStepped:Connect(function()
+    local last = player:GetAttribute("LastDash")    or 0
+    local cd   = player:GetAttribute("DashCooldown") or 1.4
+    local prog = math.min(1, (tick() - last) / cd)
+    dashCdFill.Size = UDim2.new(prog, 0, 1, 0)
+    dashCdFill.BackgroundColor3 = prog >= 1
+        and Color3.fromRGB(120, 180, 255)
+        or  Color3.fromRGB(50, 70, 140)
+
+    -- Progress bar: poll character Z position
+    local char = player.Character
+    if char then
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local zTravel = math.max(0, root.Position.Z - _levelStartZ)
+            local total   = _levelSections * _sectionDepth
+            local pct     = math.min(1, zTravel / total)
+            progressFill.Size = UDim2.new(pct, 0, 1, 0)
+            progressLabel.Text = "Progress: " .. math.floor(pct * 100) .. "%"
+        end
+    end
+end)
+
+-- ── Kill feed ─────────────────────────────────────────────────────────────────
+local killFeedFrame = frame("KillFeed", gui,
+    UDim2.new(0, 220, 0, 200),
+    UDim2.new(1, -234, 0, 120),
+    Color3.new(0,0,0), 1)
+
+local killFeedLayout = Instance.new("UIListLayout", killFeedFrame)
+killFeedLayout.FillDirection    = Enum.FillDirection.Vertical
+killFeedLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+killFeedLayout.Padding          = UDim.new(0, 2)
+killFeedLayout.SortOrder        = Enum.SortOrder.LayoutOrder
+
+local killFeedEntries = {}
+
+local function addKillFeedEntry(data)
+    local isElite = data.isElite
+    local name    = data.name or "Enemy"
+    local score   = data.score or 0
+
+    local row = Instance.new("Frame", killFeedFrame)
+    row.Size  = UDim2.new(1, 0, 0, 20)
+    row.BackgroundColor3 = Color3.fromRGB(8, 8, 20)
+    row.BackgroundTransparency = 0.35
+    row.BorderSizePixel = 0
+    corner(row, 4)
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(1, -4, 1, 0)
+    lbl.Position = UDim2.new(0, 4, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Text = (isElite and "★ " or "✦ ") .. name .. "  +" .. score
+    lbl.TextColor3 = isElite and Color3.fromRGB(255, 160, 50) or Color3.fromRGB(180, 220, 255)
+
+    -- Fade out after 3 seconds
+    table.insert(killFeedEntries, row)
+    task.delay(2.8, function()
+        TweenService:Create(row, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+        TweenService:Create(lbl, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+        task.wait(0.45)
+        row:Destroy()
+    end)
+
+    -- Cap feed at 6 entries
+    if #killFeedEntries > 6 then
+        local oldest = table.remove(killFeedEntries, 1)
+        if oldest and oldest.Parent then oldest:Destroy() end
+    end
+end
+
 -- ── Passive icons ────────────────────────────────────────────────────────────
 local passivesRow = frame("Passives", gui,
     UDim2.new(0, 300, 0, 26),
@@ -328,8 +443,20 @@ Events:WaitForChild("ComboUpdate").OnClientEvent:Connect(function(d)
 end)
 
 Events:WaitForChild("LevelStart").OnClientEvent:Connect(function(d)
-    if d.zone   then showBanner("LEVEL " .. (d.level or "?"), d.zone) end
+    if d.zone then showBanner("LEVEL " .. (d.level or "?"), d.zone) end
     if d.portalOpen then showBanner("ALL CLEAR", "Reach the portal!", 2) end
+    -- Reset progress bar origin
+    local char = player.Character
+    if char then
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then _levelStartZ = root.Position.Z end
+    end
+    progressFill.Size = UDim2.new(0, 0, 1, 0)
+    if d.sections then _levelSections = d.sections end
+end)
+
+Events:WaitForChild("KillFeed").OnClientEvent:Connect(function(d)
+    addKillFeedEntry(d)
 end)
 
 Events:WaitForChild("LevelComplete").OnClientEvent:Connect(function(d)

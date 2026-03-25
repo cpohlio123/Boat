@@ -18,8 +18,25 @@ EnemyManager.onHazardDamage      = nil   -- function(player, damage)
 -- Player state registry (for AI targeting)
 EnemyManager.playerStates = {}
 
-local activeEnemies = {}
-local nextEnemyId   = 1
+local activeEnemies  = {}
+local deadEnemyNames = {}  -- [id] = { name, isElite } kept briefly for kill feed
+local nextEnemyId    = 1
+
+-- Elite data copy with boosted stats
+local function makeEliteData(base)
+    local d = {}
+    for k, v in pairs(base) do d[k] = v end
+    d.displayName  = "★ " .. base.displayName
+    d.maxHp        = base.maxHp  * 2
+    d.attackDamage = base.attackDamage * 1.5
+    d.speed        = base.speed  * 1.25
+    d.color        = Color3.fromRGB(
+        math.min(255, math.floor(base.color.R * 255 + 70)),
+        math.max(0,   math.floor(base.color.G * 255 - 40)),
+        math.max(0,   math.floor(base.color.B * 255 - 40))
+    )
+    return d
+end
 
 local function newId()
     local id = "E" .. nextEnemyId; nextEnemyId = nextEnemyId + 1; return id
@@ -250,13 +267,14 @@ local function startAI(record, folder)
                 -- Attack
                 if now - lastAttack >= data.attackCooldown then
                     lastAttack = now
+                    local finalDmg = data.attackDamage * (record.dmgMult or 1)
                     if data.attackType == "melee" and dist <= data.attackRange + 1 then
                         for _, player in ipairs(Players:GetPlayers()) do
                             local char = player.Character
                             if char and char:FindFirstChild("HumanoidRootPart") == target then
                                 local ps = EnemyManager.playerStates[player.UserId]
                                 if ps and EnemyManager.onEnemyAttackPlayer then
-                                    EnemyManager.onEnemyAttackPlayer(ps, data.attackDamage, nil)
+                                    EnemyManager.onEnemyAttackPlayer(ps, finalDmg, nil)
                                 end
                                 break
                             end
@@ -274,7 +292,7 @@ local function startAI(record, folder)
                             end
                         end
                         fireProjectile(pos, target.Position, data.projectileSpeed,
-                                       data.attackDamage, dotInfo, folder, attackerPS)
+                                       finalDmg, dotInfo, folder, attackerPS)
                     end
                 end
 
@@ -284,32 +302,78 @@ local function startAI(record, folder)
 end
 
 -- ── Public API ──────────────────────────────────────────────────────────────
-function EnemyManager.spawnEnemies(playerState, spawnList, folder)
+function EnemyManager.spawnEnemies(playerState, spawnList, folder, opts)
+    opts = opts or {}
+    local hpMult  = opts.enemyHpMult  or 1
+    local dmgMult = opts.enemyDmgMult or 1
+    local level   = opts.level or 1
+
     EnemyManager.playerStates[playerState.player.UserId] = playerState
 
     for _, spawnInfo in ipairs(spawnList) do
-        local data = EnemyData[spawnInfo.enemyType]
-        if not data then continue end
+        local baseData = EnemyData[spawnInfo.enemyType]
+        if not baseData then continue end
+
+        -- Elite chance increases with level (cap at 40%)
+        local eliteChance = level >= 3
+            and math.min(GameConfig.ELITE_CHANCE + (level - 3) * 0.01, 0.40)
+            or 0
+        local isElite = math.random() < eliteChance
+        local data    = isElite and makeEliteData(baseData) or baseData
 
         local id    = newId()
         local model = buildEnemyModel(data, spawnInfo.position, folder)
+
+        -- Elite visual: red outline via SelectionBox
+        if isElite then
+            local sb = Instance.new("SelectionBox")
+            sb.Color3         = Color3.fromRGB(255, 30, 30)
+            sb.LineThickness  = 0.06
+            sb.SurfaceColor3  = Color3.fromRGB(255, 30, 30)
+            sb.SurfaceTransparency = 0.85
+            sb.Adornee        = model:FindFirstChild("Body")
+            sb.Parent         = model
+
+            -- Crown gem above head
+            local gem = Instance.new("Part")
+            gem.Name = "EliteCrown"; gem.Size = Vector3.new(0.6,0.6,0.6)
+            gem.Shape = Enum.PartType.Ball
+            gem.Color = Color3.fromRGB(255, 200, 30); gem.Material = Enum.Material.Neon
+            gem.Anchored = true; gem.CanCollide = false; gem.CastShadow = false
+            gem.CFrame = model.Body.CFrame * CFrame.new(0, data.bodySize.Y * 0.55, 0)
+            gem.Parent = model
+            local gl = Instance.new("PointLight", gem); gl.Color = Color3.fromRGB(255,200,30); gl.Range = 8; gl.Brightness = 2
+        end
 
         local idTag = Instance.new("StringValue")
         idTag.Name = "EnemyId"; idTag.Value = id; idTag.Parent = model
 
         local record = {
-            id    = id,
-            data  = data,
-            model = model,
-            hp    = data.maxHp,
-            maxHp = data.maxHp,
-            alive = true,
-            face  = spawnInfo.face or "floor",
+            id      = id,
+            data    = data,
+            model   = model,
+            hp      = math.floor(data.maxHp * hpMult),
+            maxHp   = math.floor(data.maxHp * hpMult),
+            alive   = true,
+            face    = spawnInfo.face or "floor",
+            isElite = isElite,
+            dmgMult = dmgMult * (isElite and 1.5 or 1),
+            score   = (baseData.score or 0) * (isElite and 2 or 1),
         }
         activeEnemies[id] = record
         table.insert(playerState.enemies, id)
         startAI(record, folder)
     end
+end
+
+function EnemyManager.getEnemyName(enemyId)
+    local r = activeEnemies[enemyId] or deadEnemyNames[enemyId]
+    return r and (r.data and r.data.displayName or r.name) or "Enemy"
+end
+
+function EnemyManager.wasElite(enemyId)
+    local r = activeEnemies[enemyId] or deadEnemyNames[enemyId]
+    return r and r.isElite or false
 end
 
 -- Returns (died, score)
@@ -346,11 +410,15 @@ function EnemyManager.damageEnemy(playerState, enemyId, damage, damageType)
             dropHPOrb(deathPos, folder)
         end
 
+        -- Keep name for kill feed query
+        deadEnemyNames[enemyId] = { name = rec.data.displayName, isElite = rec.isElite }
+        task.delay(5, function() deadEnemyNames[enemyId] = nil end)
+
         activeEnemies[enemyId] = nil
         for i, eid in ipairs(playerState.enemies) do
             if eid == enemyId then table.remove(playerState.enemies, i); break end
         end
-        return true, rec.data.score or 0
+        return true, rec.score or rec.data.score or 0
     end
     return false, 0
 end

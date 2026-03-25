@@ -56,6 +56,23 @@ local GameConfig = {
     MOVING_PLATFORM_CHANCE  = 0.18,   -- chance a platform is a mover
     MOVER_SPEED             = 5,      -- studs per second travel speed
 
+    -- Dash
+    DASH_COOLDOWN  = 1.4,
+    DASH_SPEED     = 60,
+    DASH_DURATION  = 0.16,
+
+    -- Critical hits
+    CRIT_CHANCE = 0.15,
+    CRIT_MULT   = 2.0,
+
+    -- Elite enemies (activate at level 3+)
+    ELITE_CHANCE = 0.22,
+
+    -- Crumbling platforms
+    CRUMBLE_CHANCE  = 0.10,
+    CRUMBLE_WARN    = 1.2,   -- seconds of flashing before falling
+    CRUMBLE_RESPAWN = 5.0,   -- seconds before reappearing
+
     -- Screen shake (applied client-side on damage)
     SHAKE_DURATION  = 0.45,
     SHAKE_INTENSITY = 0.45,

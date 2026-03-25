@@ -37,6 +37,8 @@ local currentWeapon   = "blaster"
 local damageMult      = 1
 local lastShootTime   = -999
 local lastMeleeTime   = -999
+local lastDashTime    = -999
+local isDashing       = false
 
 local GRAV_DIRS = {
     Vector3.new(0, -1, 0),
@@ -130,31 +132,85 @@ PlayerDamaged.OnClientEvent:Connect(function(data)
 end)
 
 -- ── Floating damage numbers ────────────────────────────────────────────────
-local function showDamageNumber(worldPos, amount, color)
+local function showDamageNumber(worldPos, amount, color, isCrit)
     local hud = playerGui:FindFirstChild("GameHUD")
     if not hud then return end
     local screenPos, onScreen = camera:WorldToScreenPoint(worldPos)
     if not onScreen then return end
 
-    local label = Instance.new("TextLabel")
-    label.Size               = UDim2.new(0, 70, 0, 28)
-    label.Position           = UDim2.new(0, screenPos.X - 35, 0, screenPos.Y - 14)
-    label.BackgroundTransparency = 1
-    label.Text               = tostring(math.ceil(amount))
-    label.TextColor3         = color or Color3.fromRGB(255, 220, 60)
-    label.Font               = Enum.Font.GothamBold
-    label.TextSize           = 20
-    label.TextStrokeColor3   = Color3.new(0, 0, 0)
-    label.TextStrokeTransparency = 0.5
-    label.ZIndex             = 20
-    label.Parent             = hud
+    local lbl = Instance.new("TextLabel")
+    lbl.Size              = UDim2.new(0, 80, 0, isCrit and 36 or 28)
+    lbl.Position          = UDim2.new(0, screenPos.X - 40, 0, screenPos.Y - (isCrit and 18 or 14))
+    lbl.BackgroundTransparency = 1
+    lbl.Text              = (isCrit and "⚡ " or "") .. math.ceil(amount)
+    lbl.TextColor3        = isCrit and Color3.fromRGB(255, 240, 40) or (color or Color3.fromRGB(255,220,60))
+    lbl.Font              = Enum.Font.GothamBold
+    lbl.TextSize          = isCrit and 26 or 20
+    lbl.TextStrokeColor3  = Color3.new(0,0,0)
+    lbl.TextStrokeTransparency = 0.4
+    lbl.ZIndex            = 20
+    lbl.Parent            = hud
 
-    TweenService:Create(label, TweenInfo.new(0.75, Enum.EasingStyle.Quint), {
-        Position        = UDim2.new(0, screenPos.X - 35, 0, screenPos.Y - 65),
+    TweenService:Create(lbl, TweenInfo.new(isCrit and 1.0 or 0.75, Enum.EasingStyle.Quint), {
+        Position         = UDim2.new(0, screenPos.X - 40, 0, screenPos.Y - (isCrit and 80 or 65)),
         TextTransparency = 1,
-        TextSize        = 13,
+        TextSize         = isCrit and 14 or 13,
     }):Play()
-    Debris:AddItem(label, 0.8)
+    Debris:AddItem(lbl, isCrit and 1.05 or 0.8)
+end
+
+-- ── Dash ───────────────────────────────────────────────────────────────────
+local function doDash()
+    local now = tick()
+    if now - lastDashTime < GameConfig.DASH_COOLDOWN then return end
+    if isDashing then return end
+    lastDashTime = now
+    isDashing    = true
+    player:SetAttribute("LastDash",    now)
+    player:SetAttribute("DashCooldown", GameConfig.DASH_COOLDOWN)
+
+    -- Dash in look direction (projected onto gravity plane)
+    local up   = -gravDir
+    local look = rootPart.CFrame.LookVector
+    look = (look - look:Dot(up) * up)
+    if look.Magnitude < 0.01 then look = Vector3.new(0, 0, -1) end
+    look = look.Unit
+
+    local bv = Instance.new("BodyVelocity")
+    bv.Velocity  = look * GameConfig.DASH_SPEED
+    bv.MaxForce  = Vector3.new(1e6, 1e6, 1e6)
+    bv.Parent    = rootPart
+
+    -- Ghost afterimages
+    local function spawnGhost()
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                local g = part:Clone()
+                g.Anchored   = true; g.CanCollide = false
+                g.CastShadow = false
+                g.Material   = Enum.Material.Neon
+                g.Color      = Color3.fromRGB(80, 160, 255)
+                g.Transparency = 0.55
+                g.Parent     = workspace
+                TweenService:Create(g, TweenInfo.new(0.28), { Transparency = 1 }):Play()
+                Debris:AddItem(g, 0.32)
+            end
+        end
+    end
+    spawnGhost()
+    task.delay(0.06, spawnGhost)
+    task.delay(0.12, spawnGhost)
+
+    Debris:AddItem(bv, GameConfig.DASH_DURATION)
+    task.delay(GameConfig.DASH_DURATION + 0.05, function() isDashing = false end)
+end
+
+-- ── Critical hit ────────────────────────────────────────────────────────────
+local function applyCrit(damage)
+    if math.random() < GameConfig.CRIT_CHANCE then
+        return damage * GameConfig.CRIT_MULT, true
+    end
+    return damage, false
 end
 
 -- ── Gravity switch ─────────────────────────────────────────────────────────
@@ -270,8 +326,9 @@ local function doShoot()
             local ep  = hit and hit.Position or (origin + sd*range)
             createTracer(origin, ep, color)
             if hit then
-                hitModel(hit.Instance, dmg, "ranged")
-                showDamageNumber(ep, dmg, color)
+                local fd, isCrit = applyCrit(dmg)
+                hitModel(hit.Instance, fd, "ranged")
+                showDamageNumber(ep, fd, color, isCrit)
             end
         end
 
@@ -291,8 +348,9 @@ local function doShoot()
                 local eid = m:FindFirstChild("EnemyId")
                 if eid and not done[eid.Value] then
                     done[eid.Value] = true
-                    DamageEnemy:FireServer(eid.Value, dmg, "ranged")
-                    showDamageNumber(p.Position, dmg, color)
+                    local fd, isCrit = applyCrit(dmg)
+                    DamageEnemy:FireServer(eid.Value, fd, "ranged")
+                    showDamageNumber(p.Position, fd, color, isCrit)
                 end
                 if m:FindFirstChild("IsBoss") then DamageBoss:FireServer(dmg * 0.6) end
             end
@@ -309,14 +367,16 @@ local function doShoot()
         local ep  = hit and hit.Position or (origin + dir*range)
         createTracer(origin, ep, color)
         if hit then
-            hitModel(hit.Instance, dmg, "ranged")
-            showDamageNumber(ep, dmg, color)
+            local fd, isCrit = applyCrit(dmg)
+            hitModel(hit.Instance, fd, "ranged")
+            showDamageNumber(ep, fd, color, isCrit)
             -- Sniper pierce
             if currentWeapon == "sniper" then
                 local hit2 = shootRay(hit.Position + dir*0.5, dir, range - (hit.Position-origin).Magnitude)
                 if hit2 then
-                    hitModel(hit2.Instance, dmg * 0.55, "ranged")
-                    showDamageNumber(hit2.Position, dmg*0.55, color)
+                    local fd2, isCrit2 = applyCrit(dmg * 0.55)
+                    hitModel(hit2.Instance, fd2, "ranged")
+                    showDamageNumber(hit2.Position, fd2, color, isCrit2)
                 end
             end
         end
@@ -347,8 +407,9 @@ local function doMelee()
             local eid = m:FindFirstChild("EnemyId")
             if eid and not done[eid.Value] then
                 done[eid.Value] = true
-                DamageEnemy:FireServer(eid.Value, dmg, "melee")
-                showDamageNumber(p.Position, dmg, Color3.fromRGB(220, 180, 255))
+                local fd, isCrit = applyCrit(dmg)
+                DamageEnemy:FireServer(eid.Value, fd, "melee")
+                showDamageNumber(p.Position, fd, Color3.fromRGB(220, 180, 255), isCrit)
             end
             if m:FindFirstChild("IsBoss") then DamageBoss:FireServer(dmg) end
         end
@@ -359,6 +420,7 @@ end
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == Enum.KeyCode.G then doGravitySwitch() end
+    if input.KeyCode == Enum.KeyCode.LeftShift then doDash() end
     if input.KeyCode == Enum.KeyCode.E or input.KeyCode == Enum.KeyCode.F then doMelee() end
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         if currentWeapon == "sword" then doMelee() else doShoot() end

@@ -128,6 +128,64 @@ local function makePillar(z, yCenter, folder, wallColor)
     addPointLight(band, Color3.fromRGB(80, 180, 255), 1.2)
 end
 
+-- ── Crumbling platform ──────────────────────────────────────────────────────
+local function makeCrumblingPlatform(pos, folder, zone)
+    local p = makePart(FSIZE,
+        zone.floorColor:Lerp(Color3.fromRGB(200, 140, 70), 0.35),
+        Enum.Material.SmoothPlastic, folder)
+    p.Name  = "CrumblingPlatform"
+    p.CFrame = CFrame.new(pos)
+
+    -- Crack overlay
+    local cracks = makePart(
+        Vector3.new(FSIZE.X * 0.75, 0.12, FSIZE.Z * 0.75),
+        Color3.fromRGB(55, 35, 18), Enum.Material.SmoothPlastic, folder)
+    cracks.CanCollide = false
+    cracks.CFrame     = CFrame.new(pos) * CFrame.new(0, FSIZE.Y * 0.5 + 0.06, 0)
+
+    local crumbling = false
+    p.Touched:Connect(function(hit)
+        local char = hit:FindFirstAncestorOfClass("Model")
+        if not char then return end
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character == char then
+                if crumbling then return end
+                crumbling = true
+                task.spawn(function()
+                    local origColor = p.Color
+                    -- Warning flash
+                    local warnT = GameConfig.CRUMBLE_WARN
+                    local ticks = math.floor(warnT / 0.14)
+                    for _ = 1, ticks do
+                        if not p.Parent then return end
+                        p.Color = Color3.fromRGB(255, 80, 20)
+                        task.wait(0.07)
+                        p.Color = origColor
+                        task.wait(0.07)
+                    end
+                    if not p.Parent then return end
+                    -- Fall / disappear
+                    p.Transparency   = 0.5
+                    cracks.Transparency = 0.5
+                    p.CanCollide     = false
+                    task.wait(0.2)
+                    p.Transparency   = 1
+                    cracks.Transparency = 1
+                    -- Respawn
+                    task.wait(GameConfig.CRUMBLE_RESPAWN)
+                    if not p.Parent then return end
+                    p.Transparency   = 0
+                    cracks.Transparency = 0
+                    p.CanCollide     = true
+                    p.Color          = origColor
+                    crumbling        = false
+                end)
+                return
+            end
+        end
+    end)
+end
+
 -- ── Tunnel shell ────────────────────────────────────────────────────────────
 local function buildTunnelShell(totalZ, zone, folder)
     local thickness = 2
@@ -201,8 +259,13 @@ function LevelGenerator.generate(levelNumber, parent)
                 local isHazard = not safe and rng:NextNumber() < GameConfig.HAZARD_CHANCE
                 local isMover  = not safe and not isHazard and rng:NextNumber() < GameConfig.MOVING_PLATFORM_CHANCE
 
+                local isCrumble = not safe and not isHazard and not isMover
+                                  and rng:NextNumber() < GameConfig.CRUMBLE_CHANCE
+
                 if isHazard then
                     makeHazardPlatform(Vector3.new(x, -HALF + FSIZE.Y * 0.5, z), folder)
+                elseif isCrumble then
+                    makeCrumblingPlatform(Vector3.new(x, -HALF + FSIZE.Y * 0.5, z), folder, zone)
                 elseif isMover then
                     local offset = rng:NextNumber() * 6 - 3  -- ±3 studs sideways travel
                     makeMovingPlatform(
