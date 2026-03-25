@@ -1,0 +1,28 @@
+{
+  "name": "VoidRunner",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Modules": {
+        "$className": "Folder",
+        "$path": "src/ReplicatedStorage/Modules"
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$path": "src/ServerScriptService"
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterCharacterScripts": {
+        "$className": "StarterCharacterScripts",
+        "$path": "src/StarterCharacterScripts"
+      }
+    },
+    "StarterGui": {
+      "$className": "StarterGui",
+      "$path": "src/StarterGui"
+    }
+  }
+}
