@@ -237,7 +237,7 @@ local function startLevel(ps)
             enemyHpMult  = ps.enemyHpMult,
             enemyDmgMult = ps.enemyDmgMult,
         })
-        LevelStart:FireClient(player, { level = ps.level, zone = zone.name, isBoss = false })
+        LevelStart:FireClient(player, { level = ps.level, zone = zone.name, isBoss = false, sections = GameConfig.LEVEL_SECTIONS })
     end
 
     sendHUD(ps)
@@ -256,7 +256,9 @@ function onLevelComplete(ps)
 end
 
 local function onPlayerDeath(ps)
+    if ps.state == STATE.DEAD then return end  -- guard against double-death
     ps.state = STATE.DEAD
+    EnemyManager.clearEnemies(ps)
     GameOverEvent:FireClient(ps.player, {
         level       = ps.level,
         score       = ps.score,
@@ -266,6 +268,14 @@ local function onPlayerDeath(ps)
         weapon      = ps.weapon,
         passives    = ps.passives,
     })
+    -- Kill the Roblox Humanoid so the character respawns (triggers onCharAdded)
+    task.delay(2.5, function()
+        local char = ps.player.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.Health = 0 end
+        end
+    end)
 end
 
 -- ── Remote event handlers ──────────────────────────────────────────────────
@@ -403,7 +413,7 @@ local DIFF = {
 }
 SetDifficulty.OnServerEvent:Connect(function(player, key)
     local ps = playerStates[player.UserId]
-    if not ps or ps.level > 1 then return end  -- only before run starts
+    if not ps or ps.state ~= STATE.IDLE then return end  -- only while waiting at menu
     local d = DIFF[key] or DIFF.normal
     ps.difficulty    = key
     ps.enemyHpMult   = d.enemyHpMult
@@ -424,13 +434,33 @@ local function setupPlayer(player)
 
     local function onCharAdded()
         task.wait(1.5)
-        if ps.state == STATE.DEAD or ps.state == STATE.IDLE then
+        if ps.state == STATE.DEAD then
+            -- After death: rebuild state (keep difficulty) then restart
+            local diff = ps.difficulty
+            local hm   = ps.enemyHpMult
+            local dm   = ps.enemyDmgMult
             local fresh = newPlayerState(player)
-            fresh.state = STATE.IDLE
+            fresh.state        = STATE.IDLE
+            fresh.difficulty   = diff
+            fresh.enemyHpMult  = hm
+            fresh.enemyDmgMult = dm
             playerStates[player.UserId] = fresh
             ps = fresh
+            task.wait(1)
+            startLevel(ps)
+        elseif ps.state == STATE.IDLE then
+            -- Fresh join: DifficultySelect.client.lua will fire SetDifficulty.
+            -- Fallback: auto-start with normal after 45 seconds if player never picks.
+            task.delay(45, function()
+                if ps.state == STATE.IDLE then
+                    startLevel(ps)
+                end
+            end)
+            -- Do NOT call startLevel here — wait for difficulty selection.
+        else
+            -- Mid-game respawn (edge case): restart current level
+            startLevel(ps)
         end
-        startLevel(ps)
     end
 
     if player.Character then onCharAdded() end

@@ -224,6 +224,30 @@ local function buildEndPortal(z, accentColor, folder)
     local tag = Instance.new("BoolValue"); tag.Name = "IsEndPortal"; tag.Parent = portal
 end
 
+-- ── Stalactite (ceiling spike) ───────────────────────────────────────────────
+local function makeStalactite(z, folder, color)
+    local height = HALF * 0.45 + math.random() * HALF * 0.25
+    local spike  = makePart(Vector3.new(1.5, height, 1.5), color, Enum.Material.SmoothPlastic, folder)
+    spike.Name        = "Stalactite"
+    spike.CanCollide  = true
+    local xOff = (math.random() - 0.5) * HALF * 1.2
+    spike.CFrame = CFrame.new(xOff, HALF - height * 0.5, z)
+end
+
+-- ── Ruin arch (paired side pillars) ─────────────────────────────────────────
+local function makeRuinArch(z, folder, color)
+    local h = HALF * 0.6
+    for _, sx in ipairs({ -HALF * 0.65, HALF * 0.65 }) do
+        local p = makePart(Vector3.new(2.5, h, 2.5), color, Enum.Material.SmoothPlastic, folder)
+        p.Name   = "RuinArch"
+        p.CFrame = CFrame.new(sx, -HALF + h * 0.5, z)
+        -- Crumbled top accent
+        local cap = makePart(Vector3.new(3.2, 1, 3.2), color:Lerp(Color3.new(1,1,1), 0.15),
+            Enum.Material.SmoothPlastic, folder)
+        cap.CanCollide = false; cap.CFrame = CFrame.new(sx, -HALF + h + 0.5, z)
+    end
+end
+
 -- ── Main generate function ──────────────────────────────────────────────────
 function LevelGenerator.generate(levelNumber, parent)
     local zone = GameConfig.ZONES[((levelNumber - 1) % #GameConfig.ZONES) + 1]
@@ -232,6 +256,10 @@ function LevelGenerator.generate(levelNumber, parent)
     local folder = Instance.new("Folder")
     folder.Name  = "Level_" .. levelNumber
     folder.Parent = parent
+
+    -- Zone-specific overrides
+    local hazardMult = zone.hazardMult or 1.0
+    local effectiveHazardChance = GameConfig.HAZARD_CHANCE * hazardMult
 
     local gapChance    = math.min(0.08 + levelNumber * 0.018, 0.48)
     local enemySpawns  = {}
@@ -256,7 +284,7 @@ function LevelGenerator.generate(levelNumber, parent)
         -- ── FLOOR ────────────────────────────────────────────────────────
         for _, x in ipairs(COL_X) do
             if safe or rng:NextNumber() > gapChance then
-                local isHazard = not safe and rng:NextNumber() < GameConfig.HAZARD_CHANCE
+                local isHazard = not safe and rng:NextNumber() < effectiveHazardChance
                 local isMover  = not safe and not isHazard and rng:NextNumber() < GameConfig.MOVING_PLATFORM_CHANCE
 
                 local isCrumble = not safe and not isHazard and not isMover
@@ -282,8 +310,8 @@ function LevelGenerator.generate(levelNumber, parent)
                     end
                 end
 
-                -- Enemy spawn
-                if i > 2 and i < SECTIONS - 2 and rng:NextNumber() < GameConfig.ENEMY_SPAWN_CHANCE then
+                -- Enemy spawn (start at section 4 so enemies aren't in detection range at spawn)
+                if i > 4 and i < SECTIONS - 2 and rng:NextNumber() < GameConfig.ENEMY_SPAWN_CHANCE then
                     local types = zone.enemies
                     table.insert(enemySpawns, {
                         position  = Vector3.new(x, -HALF + FSIZE.Y + 2.5, z),
@@ -349,6 +377,18 @@ function LevelGenerator.generate(levelNumber, parent)
         if i > 4 and i < SECTIONS - 2 and i % 7 == 0 then
             if rng:NextNumber() < 0.55 then
                 makePillar(z, 0, folder, zone.wallColor)
+            end
+        end
+
+        -- ── ZONE-SPECIFIC DECORATIONS ─────────────────────────────────────
+        if i > 2 and i < SECTIONS - 1 then
+            -- Frozen Wastes: icicle stalactites hang from ceiling
+            if zone.stalactites and i % 3 == 0 and rng:NextNumber() < 0.60 then
+                makeStalactite(z, folder, zone.accentColor:Lerp(Color3.new(1,1,1), 0.4))
+            end
+            -- Ancient Ruins: crumbling arch pairs at wider intervals
+            if zone.ruinPillars and i % 9 == 0 and rng:NextNumber() < 0.65 then
+                makeRuinArch(z, folder, zone.floorColor:Lerp(Color3.new(0,0,0), 0.2))
             end
         end
     end

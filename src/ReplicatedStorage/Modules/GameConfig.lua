@@ -107,6 +107,37 @@ local GameConfig = {
             accentColor= Color3.fromRGB(200, 80, 255),
             enemies    = { "Scout", "Crawler", "Grunt" },
         },
+        {
+            name       = "Frozen Wastes",
+            floorColor = Color3.fromRGB(155, 195, 230),
+            wallColor  = Color3.fromRGB(110, 155, 200),
+            accentColor= Color3.fromRGB(190, 240, 255),
+            enemies    = { "Phantom", "Drone", "SniperBot" },
+            stalactites = true,
+        },
+        {
+            name       = "Deep Space Station",
+            floorColor = Color3.fromRGB(22, 26, 44),
+            wallColor  = Color3.fromRGB(15, 18, 34),
+            accentColor= Color3.fromRGB(55, 195, 255),
+            enemies    = { "Scout", "Bomber", "Turret" },
+        },
+        {
+            name       = "Ancient Ruins",
+            floorColor = Color3.fromRGB(52, 76, 42),
+            wallColor  = Color3.fromRGB(38, 58, 30),
+            accentColor= Color3.fromRGB(125, 255, 95),
+            enemies    = { "Crawler", "Swarm", "Berserker" },
+            ruinPillars = true,
+        },
+        {
+            name       = "Reactor Core",
+            floorColor = Color3.fromRGB(68, 28, 18),
+            wallColor  = Color3.fromRGB(50, 20, 12),
+            accentColor= Color3.fromRGB(255, 85, 18),
+            enemies    = { "Turret", "Juggernaut", "Shielder" },
+            hazardMult = 2.2,
+        },
     },
 }
 

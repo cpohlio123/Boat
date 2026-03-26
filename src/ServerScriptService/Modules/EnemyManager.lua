@@ -228,7 +228,12 @@ end
 local function startAI(record, folder)
     local data = record.data
     task.spawn(function()
-        local lastAttack = 0
+        -- Brief spawn delay so enemies don't attack the instant the level loads
+        task.wait(2.0 + math.random() * 1.0)
+
+        local lastAttack   = 0
+        local lastTeleport = 0
+
         while record.alive and record.model and record.model.Parent do
             task.wait(0.1)
             if not record.alive then break end
@@ -242,19 +247,51 @@ local function startAI(record, folder)
             if target then
                 local now = tick()
 
-                -- Smooth approach: lerp toward target if outside attack range
-                if dist > data.attackRange then
-                    local dir    = (target.Position - pos).Unit
-                    local newPos = pos + dir * math.min(data.speed * 0.1, dist - data.attackRange)
+                -- Enrage: speed boost when HP drops below threshold
+                local effectiveSpeed = data.speed
+                if data.enrageBelow and record.hp < record.maxHp * data.enrageBelow then
+                    effectiveSpeed = data.rageSpeed or (data.speed * 2.5)
+                    if not record.enraged then
+                        record.enraged = true
+                        body.Color = Color3.fromRGB(255, 45, 20)
+                    end
+                end
 
-                    -- Clamp to spawn face so enemy doesn't leave its platform
+                -- Phantom teleport: jump near target when far away
+                if data.teleports
+                    and now - lastTeleport > (data.teleportCooldown or 3.5)
+                    and dist > (data.teleportRange or 18) then
+                    lastTeleport = now
+                    local tpDir = (target.Position - pos).Unit
+                    local tpPos = target.Position - tpDir * ((data.attackRange or 4) + 2)
+                    body.CFrame = CFrame.new(tpPos)
+                    local eye = record.model:FindFirstChild("Eye")
+                    if eye then
+                        eye.CFrame = body.CFrame * CFrame.new(0, data.bodySize.Y * 0.15, -data.bodySize.Z * 0.5)
+                    end
+                    body.Transparency = 0.8
+                    task.delay(0.18, function() if body.Parent then body.Transparency = 0 end end)
+                    dist = (body.Position - target.Position).Magnitude
+                end
+
+                -- Movement (stationary enemies only rotate to face target)
+                if data.isStationary then
+                    local dir = (target.Position - pos).Unit
+                    body.CFrame = CFrame.new(pos, pos + dir)
+                    local eye = record.model:FindFirstChild("Eye")
+                    if eye then
+                        eye.CFrame = body.CFrame * CFrame.new(0, data.bodySize.Y * 0.15, -data.bodySize.Z * 0.5)
+                    end
+                elseif dist > data.attackRange then
+                    local dir    = (target.Position - pos).Unit
+                    local newPos = pos + dir * math.min(effectiveSpeed * 0.1, dist - data.attackRange)
+
                     if record.face == "floor" or record.face == "ceiling" then
                         newPos = Vector3.new(newPos.X, pos.Y, newPos.Z)
                     elseif record.face == "left" or record.face == "right" then
                         newPos = Vector3.new(pos.X, newPos.Y, newPos.Z)
                     end
 
-                    -- Lerp for smoothness
                     local smoothPos = pos:Lerp(newPos, 0.7)
                     body.CFrame  = CFrame.new(smoothPos, smoothPos + dir)
                     local eye = record.model:FindFirstChild("Eye")
