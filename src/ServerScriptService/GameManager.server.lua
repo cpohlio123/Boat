@@ -195,31 +195,48 @@ end
 
 -- ── Teleport helpers ─────────────────────────────────────────────────────
 local function teleportToHub(player)
+    task.wait(0.1)
     local char = player.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
-    if root then
-        root.CFrame = CFrame.new(HubBuilder.SPAWN_POS)
-        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-    end
+    if not root then return end
+    root.Anchored = true
+    root.CFrame = CFrame.new(HubBuilder.SPAWN_POS)
+    root.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
+    root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+    task.wait(0.15)
+    root.Anchored = false
 end
 
 local function teleportToStart(player)
+    -- Wait for level geometry to fully register in physics
+    task.wait(0.6)
     local char = player.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
-    if root then
-        -- Brief wait so the generated parts register collision
-        task.wait(0.3)
-        root.CFrame = CFrame.new(0, -GameConfig.TUNNEL_HALF + GameConfig.FLOOR_PLATFORM_SIZE.Y + 3, 0)
-        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-    end
+    if not root then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    -- Anchor to prevent falling during teleport
+    root.Anchored = true
+    root.CFrame = CFrame.new(0, -GameConfig.TUNNEL_HALF + GameConfig.FLOOR_PLATFORM_SIZE.Y + 4, 5)
+    root.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
+    root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+    -- Reset walk speed
+    if hum then hum.WalkSpeed = GameConfig.BASE_MOVE_SPEED end
+    -- Brief pause while anchored so physics settles
+    task.wait(0.3)
+    root.Anchored = false
 end
 
 -- ── Level flow ───────────────────────────────────────────────────────────
 local function startLevel(ps)
     local player = ps.player
-    if not player.Character then return end
+    local char = player.Character
+    if not char then return end
+
+    -- Anchor the character immediately so they don't fall while level builds
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if root then root.Anchored = true end
 
     if ps.currentLevel and ps.currentLevel.Parent then
         ps.currentLevel:Destroy()
@@ -236,14 +253,14 @@ local function startLevel(ps)
     local portal = levelFolder:FindFirstChild("EndPortal", true)
     if portal then
         portal.Touched:Connect(function(hit)
-            local char = player.Character
-            if char and hit:IsDescendantOf(char) and ps.state == STATE.PLAYING then
+            local curChar = player.Character
+            if curChar and hit:IsDescendantOf(curChar) and ps.state == STATE.PLAYING then
                 onLevelComplete(ps)
             end
         end)
     end
 
-    teleportToStart(player)
+    teleportToStart(player)  -- handles anchoring/unanchoring internally
 
     if isBoss then
         ps.state = STATE.BOSS
@@ -489,29 +506,29 @@ local function setupPlayer(player)
     playerStates[player.UserId] = ps
 
     local function onCharAdded()
-        task.wait(1.5)
-        if ps.state == STATE.DEAD then
-            -- After death: clean up level, return to hub
-            local diff = ps.difficulty
-            local hm   = ps.enemyHpMult
-            local dm   = ps.enemyDmgMult
-            if ps.currentLevel and ps.currentLevel.Parent then
-                ps.currentLevel:Destroy()
-            end
-            local fresh = newPlayerState(player)
-            fresh.difficulty   = diff
-            fresh.enemyHpMult  = hm
-            fresh.enemyDmgMult = dm
-            playerStates[player.UserId] = fresh
-            ps = fresh
+        task.wait(0.5)
+        if ps.state == STATE.HUB and not ps.currentLevel then
+            -- First join or already in hub: go straight to hub
             teleportToHub(player)
-        elseif ps.state == STATE.HUB then
-            -- First join: go straight to hub
-            teleportToHub(player)
-        else
-            -- Mid-game respawn (fell out of bounds): restart current level
-            startLevel(ps)
+            return
         end
+        -- Any other state (DEAD, PLAYING, BOSS, SELECTING, UPGRADES):
+        -- Clean up and return to hub. This handles death, falling out of
+        -- bounds, and any other unexpected respawn.
+        local diff = ps.difficulty
+        local hm   = ps.enemyHpMult
+        local dm   = ps.enemyDmgMult
+        if ps.currentLevel and ps.currentLevel.Parent then
+            ps.currentLevel:Destroy()
+        end
+        EnemyManager.clearEnemies(ps)
+        local fresh = newPlayerState(player)
+        fresh.difficulty   = diff
+        fresh.enemyHpMult  = hm
+        fresh.enemyDmgMult = dm
+        playerStates[player.UserId] = fresh
+        ps = fresh
+        teleportToHub(player)
     end
 
     if player.Character then onCharAdded() end
