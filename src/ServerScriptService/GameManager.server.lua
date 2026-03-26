@@ -1,6 +1,6 @@
 -- GameManager.server.lua
--- Orchestrates game flow: level generation, enemy spawning, boss fights,
--- upgrade selection, combo system, HP pickups, and run statistics.
+-- Orchestrates game flow: hub lobby, level generation, enemy spawning, boss
+-- fights, upgrade selection, combo system, HP pickups, and run statistics.
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,6 +9,7 @@ local Modules        = script.Parent:WaitForChild("Modules")
 local LevelGenerator = require(Modules.LevelGenerator)
 local EnemyManager   = require(Modules.EnemyManager)
 local BossManager    = require(Modules.BossManager)
+local HubBuilder     = require(Modules.HubBuilder)
 
 local GameConfig  = require(ReplicatedStorage.Modules.GameConfig)
 local UpgradeData = require(ReplicatedStorage.Modules.UpgradeData)
@@ -41,17 +42,28 @@ local ComboUpdate          = makeEvent("ComboUpdate")
 local HealPickup           = makeEvent("HealPickup")
 local KillFeed             = makeEvent("KillFeed")
 local SetDifficulty        = makeEvent("SetDifficulty")
+local ShowDifficultySelect = makeEvent("ShowDifficultySelect")
 
 -- ── States ─────────────────────────────────────────────────────────────────
-local STATE = { IDLE = "idle", PLAYING = "playing", BOSS = "boss", UPGRADES = "upgrades", DEAD = "dead" }
+local STATE = {
+    HUB       = "hub",
+    SELECTING = "selecting",
+    PLAYING   = "playing",
+    BOSS      = "boss",
+    UPGRADES  = "upgrades",
+    DEAD      = "dead",
+}
 
--- ── Per-player state ───────────────────────────────────────────────────────
+-- ── Build hub (once) ──────────────────────────────────────────────────────
+local hubFolder = HubBuilder.build(workspace)
+
+-- ── Per-player state ──────────────────────────────────────────────────────
 local playerStates = {}
 
 local function newPlayerState(player)
     return {
         player          = player,
-        state           = STATE.IDLE,
+        state           = STATE.HUB,
         level           = 1,
         score           = 0,
         hp              = GameConfig.BASE_MAX_HP,
@@ -125,7 +137,6 @@ local function updateCombo(ps, scored)
 
     ComboUpdate:FireClient(ps.player, { combo = ps.comboKills, mult = ps.comboMult })
 
-    -- Schedule combo expiry check
     local snapTime = now
     task.delay(GameConfig.COMBO_WINDOW + 0.15, function()
         if ps.lastKillTime == snapTime and ps.comboKills > 0 then
@@ -136,7 +147,7 @@ local function updateCombo(ps, scored)
     end)
 end
 
--- ── Upgrade helpers ────────────────────────────────────────────────────────
+-- ── Upgrade helpers ──────────────────────────────────────────────────────
 local function pickUpgrades(ps, count)
     local pool = {}
     for _, u in ipairs(UpgradeData) do
@@ -182,16 +193,30 @@ local function applyUpgrade(ps, upgradeId)
     end
 end
 
--- ── Level flow ─────────────────────────────────────────────────────────────
+-- ── Teleport helpers ─────────────────────────────────────────────────────
+local function teleportToHub(player)
+    local char = player.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if root then
+        root.CFrame = CFrame.new(HubBuilder.SPAWN_POS)
+        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end
+end
+
 local function teleportToStart(player)
     local char = player.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
     if root then
+        -- Brief wait so the generated parts register collision
+        task.wait(0.3)
         root.CFrame = CFrame.new(0, -GameConfig.TUNNEL_HALF + GameConfig.FLOOR_PLATFORM_SIZE.Y + 3, 0)
+        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     end
 end
 
+-- ── Level flow ───────────────────────────────────────────────────────────
 local function startLevel(ps)
     local player = ps.player
     if not player.Character then return end
@@ -237,7 +262,12 @@ local function startLevel(ps)
             enemyHpMult  = ps.enemyHpMult,
             enemyDmgMult = ps.enemyDmgMult,
         })
-        LevelStart:FireClient(player, { level = ps.level, zone = zone.name, isBoss = false, sections = GameConfig.LEVEL_SECTIONS })
+        LevelStart:FireClient(player, {
+            level    = ps.level,
+            zone     = zone.name,
+            isBoss   = false,
+            sections = GameConfig.LEVEL_SECTIONS,
+        })
     end
 
     sendHUD(ps)
@@ -255,8 +285,18 @@ function onLevelComplete(ps)
     ShowUpgrades:FireClient(ps.player, pickUpgrades(ps, GameConfig.UPGRADES_COUNT))
 end
 
+local function returnToHub(ps)
+    if ps.currentLevel and ps.currentLevel.Parent then
+        ps.currentLevel:Destroy()
+        ps.currentLevel = nil
+    end
+    EnemyManager.clearEnemies(ps)
+    ps.state = STATE.HUB
+    teleportToHub(ps.player)
+end
+
 local function onPlayerDeath(ps)
-    if ps.state == STATE.DEAD then return end  -- guard against double-death
+    if ps.state == STATE.DEAD then return end
     ps.state = STATE.DEAD
     EnemyManager.clearEnemies(ps)
     GameOverEvent:FireClient(ps.player, {
@@ -268,8 +308,8 @@ local function onPlayerDeath(ps)
         weapon      = ps.weapon,
         passives    = ps.passives,
     })
-    -- Kill the Roblox Humanoid so the character respawns (triggers onCharAdded)
-    task.delay(2.5, function()
+    -- Kill the Roblox Humanoid after a delay so DeathStats screen can show
+    task.delay(3.0, function()
         local char = ps.player.Character
         if char then
             local hum = char:FindFirstChildOfClass("Humanoid")
@@ -281,7 +321,7 @@ end
 -- ── Remote event handlers ──────────────────────────────────────────────────
 RequestGravitySwitch.OnServerEvent:Connect(function(player, gravDir)
     local ps = playerStates[player.UserId]
-    if not ps or ps.state == STATE.DEAD then return end
+    if not ps or ps.state == STATE.DEAD or ps.state == STATE.HUB then return end
     if ps.gravitySlamDamage > 0 then
         local char = player.Character
         if char then
@@ -308,7 +348,6 @@ DamageEnemy.OnServerEvent:Connect(function(player, enemyId, damage, damageType)
             ps.hp = math.min(ps.hp + ps.killHeal, ps.maxHp)
         end
         updateCombo(ps, score or 0)
-        -- Kill feed
         KillFeed:FireClient(player, {
             name    = EnemyManager.getEnemyName(enemyId),
             isElite = EnemyManager.wasElite(enemyId),
@@ -331,7 +370,6 @@ DamageBoss.OnServerEvent:Connect(function(player, damage)
 
     local died, phaseChanged, newPhase = BossManager.damageBoss(ps.boss, actualDmg)
 
-    -- Broadcast HP update
     BossHPUpdate:FireClient(player, {
         hp    = ps.boss.hp,
         maxHp = ps.boss.maxHp,
@@ -364,7 +402,7 @@ end)
 
 -- ── Enemy / boss attack callbacks ──────────────────────────────────────────
 local function handleDamage(ps, damage, dotInfo)
-    if ps.state == STATE.DEAD then return end
+    if ps.state == STATE.DEAD or ps.state == STATE.HUB then return end
     if ps.shield > 0 then
         local absorbed = math.min(ps.shield, damage)
         ps.shield = ps.shield - absorbed
@@ -405,7 +443,31 @@ EnemyManager.onHPPickup = function(ps)
     sendHUD(ps)
 end
 
--- Difficulty selection (fires before first level)
+LevelGenerator.onHazardDamage = function(player, damage)
+    local ps = playerStates[player.UserId]
+    if ps then handleDamage(ps, damage, nil) end
+end
+
+-- ── Hub portal interaction ───────────────────────────────────────────────
+local runPortal = hubFolder:FindFirstChild("RunPortal", true)
+if runPortal then
+    runPortal.Touched:Connect(function(hit)
+        local char = hit:FindFirstAncestorOfClass("Model")
+        if not char then return end
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character == char then
+                local ps = playerStates[player.UserId]
+                if ps and ps.state == STATE.HUB then
+                    ps.state = STATE.SELECTING
+                    ShowDifficultySelect:FireClient(player)
+                end
+                return
+            end
+        end
+    end)
+end
+
+-- ── Difficulty selection ──────────────────────────────────────────────────
 local DIFF = {
     easy   = { enemyHpMult = 0.70, enemyDmgMult = 0.70 },
     normal = { enemyHpMult = 1.00, enemyDmgMult = 1.00 },
@@ -413,21 +475,15 @@ local DIFF = {
 }
 SetDifficulty.OnServerEvent:Connect(function(player, key)
     local ps = playerStates[player.UserId]
-    if not ps or ps.state ~= STATE.IDLE then return end  -- only while waiting at menu
+    if not ps or ps.state ~= STATE.SELECTING then return end
     local d = DIFF[key] or DIFF.normal
-    ps.difficulty    = key
-    ps.enemyHpMult   = d.enemyHpMult
-    ps.enemyDmgMult  = d.enemyDmgMult
+    ps.difficulty   = key
+    ps.enemyHpMult  = d.enemyHpMult
+    ps.enemyDmgMult = d.enemyDmgMult
     startLevel(ps)
 end)
 
--- Pass the hazard callback through to the level generator
-LevelGenerator.onHazardDamage = function(player, damage)
-    local ps = playerStates[player.UserId]
-    if ps then handleDamage(ps, damage, nil) end
-end
-
--- ── Player join / leave ────────────────────────────────────────────────────
+-- ── Player join / leave ──────────────────────────────────────────────────
 local function setupPlayer(player)
     local ps = newPlayerState(player)
     playerStates[player.UserId] = ps
@@ -435,30 +491,25 @@ local function setupPlayer(player)
     local function onCharAdded()
         task.wait(1.5)
         if ps.state == STATE.DEAD then
-            -- After death: rebuild state (keep difficulty) then restart
+            -- After death: clean up level, return to hub
             local diff = ps.difficulty
             local hm   = ps.enemyHpMult
             local dm   = ps.enemyDmgMult
+            if ps.currentLevel and ps.currentLevel.Parent then
+                ps.currentLevel:Destroy()
+            end
             local fresh = newPlayerState(player)
-            fresh.state        = STATE.IDLE
             fresh.difficulty   = diff
             fresh.enemyHpMult  = hm
             fresh.enemyDmgMult = dm
             playerStates[player.UserId] = fresh
             ps = fresh
-            task.wait(1)
-            startLevel(ps)
-        elseif ps.state == STATE.IDLE then
-            -- Fresh join: DifficultySelect.client.lua will fire SetDifficulty.
-            -- Fallback: auto-start with normal after 45 seconds if player never picks.
-            task.delay(45, function()
-                if ps.state == STATE.IDLE then
-                    startLevel(ps)
-                end
-            end)
-            -- Do NOT call startLevel here — wait for difficulty selection.
+            teleportToHub(player)
+        elseif ps.state == STATE.HUB then
+            -- First join: go straight to hub
+            teleportToHub(player)
         else
-            -- Mid-game respawn (edge case): restart current level
+            -- Mid-game respawn (fell out of bounds): restart current level
             startLevel(ps)
         end
     end
@@ -479,4 +530,4 @@ end)
 
 for _, player in ipairs(Players:GetPlayers()) do setupPlayer(player) end
 
-print("[GameManager] Ready.")
+print("[GameManager] Hub built. Ready.")
