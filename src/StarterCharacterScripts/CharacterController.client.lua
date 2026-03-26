@@ -207,7 +207,8 @@ end
 
 -- ── Critical hit ────────────────────────────────────────────────────────────
 local function applyCrit(damage)
-    if math.random() < GameConfig.CRIT_CHANCE then
+    local chance = GameConfig.CRIT_CHANCE + (player:GetAttribute("CritBonus") or 0)
+    if math.random() < chance then
         return damage * GameConfig.CRIT_MULT, true
     end
     return damage, false
@@ -235,10 +236,16 @@ GravitySwitched.OnClientEvent:Connect(function(dir)
 end)
 
 UpdateHUD.OnClientEvent:Connect(function(data)
-    if data.weapon         then currentWeapon = data.weapon end
+    if data.weapon          then currentWeapon = data.weapon end
     if data.gravityCooldown then gravCooldown = data.gravityCooldown; player:SetAttribute("GravCooldown", gravCooldown) end
-    if data.doubleJump     then canDoubleJump = data.doubleJump end
-    if data.damageMult     then damageMult    = data.damageMult end
+    if data.doubleJump      then canDoubleJump = data.doubleJump end
+    if data.damageMult      then damageMult    = data.damageMult end
+    if data.critBonus       then player:SetAttribute("CritBonus",  data.critBonus) end
+    if data.damageReduction then player:SetAttribute("DmgReduce",  data.damageReduction) end
+    if data.berserkThreshold then player:SetAttribute("BerserkHP", data.berserkThreshold) end
+    if data.dashCooldown    then
+        player:SetAttribute("DashCooldown", data.dashCooldown)
+    end
 end)
 
 -- ── Hitscan helpers ────────────────────────────────────────────────────────
@@ -276,16 +283,36 @@ local function hitModel(instance, damage, damageType)
 end
 
 -- ── Weapon tables ──────────────────────────────────────────────────────────
-local WEAPON_CD    = { blaster=0.25, shotgun=0.70, sniper=1.60, sword=0, flamethrower=0.07, grenade_launcher=1.2 }
-local WEAPON_DMG   = { blaster=25,  shotgun=14,   sniper=90,   sword=0, flamethrower=10,   grenade_launcher=70  }
-local WEAPON_RANGE = { blaster=200, shotgun=80,   sniper=350,  sword=0, flamethrower=20,   grenade_launcher=120 }
+-- CD=0 for melee weapons means use MELEE_COOLDOWN
+local WEAPON_CD    = {
+    blaster=0.25, shotgun=0.70, sniper=1.60, sword=0,
+    flamethrower=0.07, grenade_launcher=1.2,
+    void_blade=0, throwing_knives=0.5, scythe=0, war_hammer=0,
+    chain_lightning=0.85, plasma_cannon=2.6, cryo_blaster=0.45, flare_gun=2.2,
+}
+local WEAPON_DMG   = {
+    blaster=25, shotgun=14, sniper=90, sword=0, flamethrower=10, grenade_launcher=70,
+    void_blade=0, throwing_knives=20, scythe=0, war_hammer=0,
+    chain_lightning=38, plasma_cannon=210, cryo_blaster=22, flare_gun=12,
+}
+local WEAPON_RANGE = {
+    blaster=200, shotgun=80, sniper=350, sword=0, flamethrower=20, grenade_launcher=120,
+    void_blade=0, throwing_knives=150, scythe=0, war_hammer=0,
+    chain_lightning=130, plasma_cannon=200, cryo_blaster=140, flare_gun=90,
+}
 local WEAPON_COLOR = {
     blaster          = Color3.fromRGB(255, 220, 60),
     shotgun          = Color3.fromRGB(255, 160, 60),
     sniper           = Color3.fromRGB(120, 220, 255),
     flamethrower     = Color3.fromRGB(255, 80, 20),
     grenade_launcher = Color3.fromRGB(180, 255, 80),
+    throwing_knives  = Color3.fromRGB(220, 200, 255),
+    chain_lightning  = Color3.fromRGB(180, 140, 255),
+    plasma_cannon    = Color3.fromRGB(255, 100, 255),
+    cryo_blaster     = Color3.fromRGB(100, 220, 255),
+    flare_gun        = Color3.fromRGB(255, 120, 20),
 }
+local MELEE_WEAPONS = { sword=true, void_blade=true, scythe=true, war_hammer=true }
 
 local function createSlash(pos, look, range)
     local s = Instance.new("Part")
@@ -302,9 +329,43 @@ local function createSlash(pos, look, range)
     Debris:AddItem(s, 0.2)
 end
 
+-- ── AoE hit helper ─────────────────────────────────────────────────────────
+local function aoeHit(center, radius, dmg, color, falloff)
+    local params = OverlapParams.new()
+    params.FilterDescendantsInstances = { character }
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local near = workspace:GetPartBoundsInRadius(center, radius, params)
+    local done = {}
+    for _, p in ipairs(near) do
+        local m = p:FindFirstAncestorOfClass("Model")
+        if m then
+            local eid = m:FindFirstChild("EnemyId")
+            if eid and not done[eid.Value] then
+                done[eid.Value] = true
+                local dist = (m:GetModelCFrame().Position - center).Magnitude
+                local scale = falloff and math.max(0.35, 1 - dist / radius) or 1
+                local fd, isCrit = applyCrit(dmg * scale)
+                DamageEnemy:FireServer(eid.Value, fd, "ranged")
+                showDamageNumber(p.Position, fd, color, isCrit)
+            end
+            if m:FindFirstChild("IsBoss") then DamageBoss:FireServer(dmg * 0.5) end
+        end
+    end
+end
+
+local function makeExplosion(pos, size, color)
+    local exp = Instance.new("Part")
+    exp.Size = Vector3.new(size,size,size); exp.Shape = Enum.PartType.Ball
+    exp.Color = color; exp.Material = Enum.Material.Neon
+    exp.Anchored = true; exp.CanCollide = false; exp.CastShadow = false
+    exp.CFrame = CFrame.new(pos); exp.Parent = workspace
+    TweenService:Create(exp, TweenInfo.new(0.25), { Transparency = 1, Size = Vector3.new(0.5,0.5,0.5) }):Play()
+    Debris:AddItem(exp, 0.28)
+end
+
 -- ── Shoot ──────────────────────────────────────────────────────────────────
 local function doShoot()
-    if currentWeapon == "sword" then return end
+    if MELEE_WEAPONS[currentWeapon] then return end
     local now = tick()
     local cd  = WEAPON_CD[currentWeapon] or 0.25
     if now - lastShootTime < cd then return end
@@ -332,35 +393,118 @@ local function doShoot()
             end
         end
 
+    elseif currentWeapon == "throwing_knives" then
+        -- 3-knife burst with slight spread
+        for k = -1, 1 do
+            local sp  = Vector3.new(k * 0.06, 0, 0)
+            local sd  = (dir + sp).Unit
+            local hit = shootRay(origin, sd, range)
+            local ep  = hit and hit.Position or (origin + sd * range)
+            createTracer(origin, ep, Color3.fromRGB(220, 200, 255))
+            if hit then
+                local fd, isCrit = applyCrit(dmg)
+                hitModel(hit.Instance, fd, "ranged")
+                showDamageNumber(ep, fd, color, isCrit)
+            end
+        end
+
+    elseif currentWeapon == "chain_lightning" then
+        -- Arc up to 4 enemies, each 75% of previous damage
+        local hit = shootRay(origin, dir, range)
+        if hit then
+            local ep = hit.Position
+            createTracer(origin, ep, color)
+            local chainDmg = dmg
+            local prevPos  = ep
+            local chained  = {}
+            for _ = 1, 4 do
+                local fd, isCrit = applyCrit(chainDmg)
+                hitModel(hit.Instance, fd, "ranged")
+                showDamageNumber(ep, fd, color, isCrit)
+                -- Find next nearest enemy within 20 studs
+                local params2 = OverlapParams.new()
+                params2.FilterDescendantsInstances = { character }
+                params2.FilterType = Enum.RaycastFilterType.Exclude
+                local near = workspace:GetPartBoundsInRadius(ep, 20, params2)
+                local nextHit, nextEp, nextInst = nil, nil, nil
+                local bestDist = 999
+                for _, p in ipairs(near) do
+                    local m = p:FindFirstAncestorOfClass("Model")
+                    if m then
+                        local eid = m:FindFirstChild("EnemyId")
+                        if eid and not chained[eid.Value] then
+                            local d = (m:GetModelCFrame().Position - ep).Magnitude
+                            if d < bestDist then
+                                bestDist = d; nextEp = m:GetModelCFrame().Position; nextInst = p
+                                chained[eid.Value] = true
+                            end
+                        end
+                    end
+                end
+                if nextEp then
+                    createTracer(prevPos, nextEp, color)
+                    prevPos = nextEp; ep = nextEp; chainDmg = chainDmg * 0.75
+                    hit = { Instance = nextInst, Position = nextEp }
+                else break end
+            end
+        else
+            createTracer(origin, origin + dir * range, color)
+        end
+
+    elseif currentWeapon == "plasma_cannon" then
+        local hit = shootRay(origin, dir, range)
+        local ep  = hit and hit.Position or (origin + dir * range)
+        createTracer(origin, ep, color)
+        makeExplosion(ep, 10, color)
+        aoeHit(ep, 12, dmg, color, true)
+
+    elseif currentWeapon == "cryo_blaster" then
+        local hit = shootRay(origin, dir, range)
+        local ep  = hit and hit.Position or (origin + dir * range)
+        createTracer(origin, ep, color)
+        if hit then
+            local fd, isCrit = applyCrit(dmg)
+            hitModel(hit.Instance, fd, "ranged")
+            showDamageNumber(ep, fd, color, isCrit)
+            -- Cryo burst visual
+            local frost = Instance.new("Part")
+            frost.Size = Vector3.new(3,3,3); frost.Shape = Enum.PartType.Ball
+            frost.Color = color; frost.Material = Enum.Material.Neon
+            frost.Anchored = true; frost.CanCollide = false
+            frost.CFrame = CFrame.new(ep); frost.Parent = workspace
+            TweenService:Create(frost, TweenInfo.new(0.3), { Transparency = 1, Size = Vector3.new(0.5,0.5,0.5) }):Play()
+            Debris:AddItem(frost, 0.35)
+        end
+
+    elseif currentWeapon == "flare_gun" then
+        local hit = shootRay(origin, dir, range)
+        local ep  = hit and hit.Position or (origin + dir * range)
+        createTracer(origin, ep, Color3.fromRGB(255, 120, 20))
+        -- Persistent fire zone — damage repeatedly for 4s
+        local flare = Instance.new("Part")
+        flare.Size = Vector3.new(6,0.5,6); flare.Shape = Enum.PartType.Cylinder
+        flare.Color = Color3.fromRGB(255, 80, 10); flare.Material = Enum.Material.Neon
+        flare.Anchored = true; flare.CanCollide = false
+        flare.CFrame = CFrame.new(ep); flare.Parent = workspace
+        TweenService:Create(flare,
+            TweenInfo.new(4, Enum.EasingStyle.Linear, Enum.EasingDirection.In),
+            { Transparency = 1, Size = Vector3.new(0.5,0.5,0.5) }
+        ):Play()
+        Debris:AddItem(flare, 4.1)
+        task.spawn(function()
+            for _ = 1, 8 do
+                task.wait(0.5)
+                if not flare.Parent then break end
+                aoeHit(ep, 7, dmg, Color3.fromRGB(255, 100, 20), false)
+            end
+        end)
+
     elseif currentWeapon == "grenade_launcher" then
         local hit = shootRay(origin, dir, range)
         local ep  = hit and hit.Position or (origin + dir*range)
         createTracer(origin, ep, color)
-        -- AoE
-        local params = OverlapParams.new()
-        params.FilterDescendantsInstances = { character }
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        local near = workspace:GetPartBoundsInRadius(ep, 8, params)
-        local done = {}
-        for _, p in ipairs(near) do
-            local m = p:FindFirstAncestorOfClass("Model")
-            if m then
-                local eid = m:FindFirstChild("EnemyId")
-                if eid and not done[eid.Value] then
-                    done[eid.Value] = true
-                    local fd, isCrit = applyCrit(dmg)
-                    DamageEnemy:FireServer(eid.Value, fd, "ranged")
-                    showDamageNumber(p.Position, fd, color, isCrit)
-                end
-                if m:FindFirstChild("IsBoss") then DamageBoss:FireServer(dmg * 0.6) end
-            end
-        end
-        local exp = Instance.new("Part")
-        exp.Size = Vector3.new(6,6,6); exp.Shape = Enum.PartType.Ball
-        exp.Color = Color3.fromRGB(255,160,40); exp.Material = Enum.Material.Neon
-        exp.Anchored = true; exp.CanCollide = false; exp.CFrame = CFrame.new(ep); exp.Parent = workspace
-        TweenService:Create(exp, TweenInfo.new(0.22), { Transparency = 1, Size = Vector3.new(1,1,1) }):Play()
-        Debris:AddItem(exp, 0.25)
+        makeExplosion(ep, 6, Color3.fromRGB(255,160,40))
+        aoeHit(ep, 8, dmg, color, false)
 
     else
         local hit = shootRay(origin, dir, range)
@@ -384,23 +528,54 @@ local function doShoot()
 end
 
 -- ── Melee ──────────────────────────────────────────────────────────────────
+local MELEE_STATS = {
+    sword      = { cd = GameConfig.MELEE_COOLDOWN * 0.8, range = GameConfig.MELEE_RANGE * 1.25, dmg = 55  },
+    void_blade = { cd = 0.35, range = 11,  dmg = 48  },
+    scythe     = { cd = 0.75, range = 14,  dmg = 70  },
+    war_hammer = { cd = 1.4,  range = 9,   dmg = 130 },
+}
 local function doMelee()
     local now = tick()
-    local cd  = currentWeapon == "sword" and GameConfig.MELEE_COOLDOWN * 0.8 or GameConfig.MELEE_COOLDOWN
+    local ms  = MELEE_STATS[currentWeapon]
+    local cd  = ms and ms.cd or GameConfig.MELEE_COOLDOWN
     if now - lastMeleeTime < cd then return end
     lastMeleeTime = now
 
-    local range = currentWeapon == "sword" and GameConfig.MELEE_RANGE * 1.25 or GameConfig.MELEE_RANGE
-    local dmg   = (currentWeapon == "sword" and 55 or GameConfig.MELEE_DAMAGE) * damageMult
+    local range = ms and ms.range or GameConfig.MELEE_RANGE
+    local dmg   = (ms and ms.dmg or GameConfig.MELEE_DAMAGE) * damageMult
     local look  = rootPart.CFrame.LookVector
     createSlash(rootPart.Position, look, range)
 
     local params = OverlapParams.new()
     params.FilterDescendantsInstances = { character }
     params.FilterType = Enum.RaycastFilterType.Exclude
-    local center = rootPart.Position + look * range * 0.5
-    local hits   = workspace:GetPartBoundsInRadius(center, range * 0.65, params)
-    local done   = {}
+
+    -- Scythe = 360° spin around player; war_hammer = wide shockwave AoE; others = frontal cone
+    local hitCenter, hitRadius
+    if currentWeapon == "scythe" then
+        hitCenter = rootPart.Position; hitRadius = range
+        -- 360 spin visual
+        for angle = 0, 300, 60 do
+            local adir = CFrame.Angles(0, math.rad(angle), 0) * look
+            createSlash(rootPart.Position, adir, range * 0.8)
+        end
+    elseif currentWeapon == "war_hammer" then
+        hitCenter = rootPart.Position + look * range * 0.5; hitRadius = range * 1.2
+        -- Shockwave ring
+        local wave = Instance.new("Part")
+        wave.Size = Vector3.new(range*2.4, 0.4, range*2.4); wave.Shape = Enum.PartType.Cylinder
+        wave.Color = Color3.fromRGB(200, 160, 80); wave.Material = Enum.Material.Neon
+        wave.Anchored = true; wave.CanCollide = false
+        wave.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0,0,math.rad(90))
+        wave.Parent = workspace
+        TweenService:Create(wave, TweenInfo.new(0.4), { Transparency = 1, Size = Vector3.new(range*4,0.1,range*4) }):Play()
+        Debris:AddItem(wave, 0.45)
+    else
+        hitCenter = rootPart.Position + look * range * 0.5; hitRadius = range * 0.65
+    end
+
+    local hits = workspace:GetPartBoundsInRadius(hitCenter, hitRadius, params)
+    local done = {}
     for _, p in ipairs(hits) do
         local m = p:FindFirstAncestorOfClass("Model")
         if m then
@@ -423,7 +598,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
     if input.KeyCode == Enum.KeyCode.LeftShift then doDash() end
     if input.KeyCode == Enum.KeyCode.E or input.KeyCode == Enum.KeyCode.F then doMelee() end
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if currentWeapon == "sword" then doMelee() else doShoot() end
+        if MELEE_WEAPONS[currentWeapon] then doMelee() else doShoot() end
     end
     if input.UserInputType == Enum.UserInputType.MouseButton2 then doMelee() end
 
@@ -442,10 +617,11 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
--- Auto-fire
+-- Auto-fire weapons
+local AUTO_FIRE = { blaster = true, flamethrower = true, chain_lightning = false }
 RunService.Heartbeat:Connect(function()
     if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-        if currentWeapon == "blaster" or currentWeapon == "flamethrower" then doShoot() end
+        if AUTO_FIRE[currentWeapon] then doShoot() end
     end
 end)
 

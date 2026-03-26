@@ -43,6 +43,8 @@ local HealPickup           = makeEvent("HealPickup")
 local KillFeed             = makeEvent("KillFeed")
 local SetDifficulty        = makeEvent("SetDifficulty")
 local ShowDifficultySelect = makeEvent("ShowDifficultySelect")
+local OpenVendor           = makeEvent("OpenVendor")
+local BuyVendorItem        = makeEvent("BuyVendorItem")
 
 -- ── States ─────────────────────────────────────────────────────────────────
 local STATE = {
@@ -60,12 +62,12 @@ local hubFolder = HubBuilder.build(workspace)
 -- ── Per-player state ──────────────────────────────────────────────────────
 local playerStates = {}
 
-local function newPlayerState(player)
+local function newPlayerState(player, prevScore)
     return {
         player          = player,
         state           = STATE.HUB,
         level           = 1,
-        score           = 0,
+        score           = prevScore or 0,
         hp              = GameConfig.BASE_MAX_HP,
         maxHp           = GameConfig.BASE_MAX_HP,
         shield          = 0,
@@ -88,6 +90,11 @@ local function newPlayerState(player)
         totalKills      = 0,
         damageDealt     = 0,
         runStartTime    = tick(),
+        -- New passives
+        critBonus         = 0,
+        damageReduction   = 0,
+        berserkThreshold  = 0,
+        dashCooldown      = GameConfig.DASH_COOLDOWN or 1.4,
         -- Difficulty
         difficulty      = "normal",
         enemyHpMult     = 1.0,
@@ -107,6 +114,10 @@ local function hudData(ps)
         gravityCooldown = ps.gravityCooldown,
         doubleJump      = ps.doubleJump,
         damageMult      = ps.damageMult,
+        critBonus       = ps.critBonus,
+        damageReduction = ps.damageReduction,
+        berserkThreshold= ps.berserkThreshold,
+        dashCooldown    = ps.dashCooldown,
     }
 end
 
@@ -185,6 +196,10 @@ local function applyUpgrade(ps, upgradeId)
         if e.shieldAmount    then ps.shield = ps.shield + e.shieldAmount end
         if e.gravitySlamDamage then ps.gravitySlamDamage = e.gravitySlamDamage end
         if e.killHeal        then ps.killHeal = ps.killHeal + e.killHeal end
+        if e.critBonus       then ps.critBonus = ps.critBonus + e.critBonus end
+        if e.damageReduction then ps.damageReduction = math.min(0.75, ps.damageReduction + e.damageReduction) end
+        if e.berserkThreshold then ps.berserkThreshold = e.berserkThreshold end
+        if e.dashCooldown    then ps.dashCooldown = math.max(0.3, (ps.dashCooldown or 1.4) + e.dashCooldown) end
         table.insert(ps.passives, upgradeId)
     elseif u.type == "consumable" then
         local e = u.effect
@@ -218,7 +233,8 @@ local function teleportToStart(player)
     local hum = char:FindFirstChildOfClass("Humanoid")
     -- Anchor to prevent falling during teleport
     root.Anchored = true
-    root.CFrame = CFrame.new(0, -GameConfig.TUNNEL_HALF + GameConfig.FLOOR_PLATFORM_SIZE.Y + 4, 5)
+    -- Land on center of guaranteed spawn pad (Z=DEPTH*2, full-width solid floor)
+    root.CFrame = CFrame.new(0, -GameConfig.TUNNEL_HALF + GameConfig.FLOOR_PLATFORM_SIZE.Y + 5, GameConfig.SECTION_DEPTH * 2)
     root.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
     root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
     -- Reset walk speed
@@ -484,6 +500,59 @@ if runPortal then
     end)
 end
 
+-- ── Vendor shop ──────────────────────────────────────────────────────────
+local VENDOR_PRICES = { common = 100, uncommon = 220, rare = 380, epic = 600 }
+
+local function makeVendorTouched(vendorType)
+    return function(hit)
+        local char = hit:FindFirstAncestorOfClass("Model")
+        if not char then return end
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character == char then
+                local ps = playerStates[player.UserId]
+                if ps and ps.state == STATE.HUB then
+                    -- Build item list for this vendor type
+                    local items = {}
+                    for _, u in ipairs(UpgradeData) do
+                        if u.type == vendorType or (vendorType == "weapons" and u.type == "weapon") then
+                            table.insert(items, {
+                                id       = u.id,
+                                name     = u.name,
+                                desc     = u.description,
+                                rarity   = u.rarity,
+                                price    = VENDOR_PRICES[u.rarity] or 200,
+                                type     = u.type,
+                            })
+                        end
+                    end
+                    OpenVendor:FireClient(player, { vendorType = vendorType, items = items, score = ps.score })
+                end
+                return
+            end
+        end
+    end
+end
+
+-- Wire up vendor counter touches from hub
+local weaponsCounter = hubFolder:FindFirstChild("WeaponsCounter", true)
+local upgradesCounter = hubFolder:FindFirstChild("UpgradesCounter", true)
+if weaponsCounter  then weaponsCounter.Touched:Connect(makeVendorTouched("weapon")) end
+if upgradesCounter then upgradesCounter.Touched:Connect(makeVendorTouched("passive")) end
+
+BuyVendorItem.OnServerEvent:Connect(function(player, itemId)
+    local ps = playerStates[player.UserId]
+    if not ps or ps.state ~= STATE.HUB then return end
+    local u = UpgradeData.byId[itemId]
+    if not u then return end
+    local price = VENDOR_PRICES[u.rarity] or 200
+    if ps.score < price then return end
+    ps.score = ps.score - price
+    applyUpgrade(ps, itemId)
+    sendHUD(ps)
+    -- Confirm purchase with updated score
+    OpenVendor:FireClient(player, { purchased = itemId, score = ps.score })
+end)
+
 -- ── Difficulty selection ──────────────────────────────────────────────────
 local DIFF = {
     easy   = { enemyHpMult = 0.70, enemyDmgMult = 0.70 },
@@ -515,14 +584,15 @@ local function setupPlayer(player)
         -- Any other state (DEAD, PLAYING, BOSS, SELECTING, UPGRADES):
         -- Clean up and return to hub. This handles death, falling out of
         -- bounds, and any other unexpected respawn.
-        local diff = ps.difficulty
-        local hm   = ps.enemyHpMult
-        local dm   = ps.enemyDmgMult
+        local diff      = ps.difficulty
+        local hm        = ps.enemyHpMult
+        local dm        = ps.enemyDmgMult
+        local prevScore = ps.score
         if ps.currentLevel and ps.currentLevel.Parent then
             ps.currentLevel:Destroy()
         end
         EnemyManager.clearEnemies(ps)
-        local fresh = newPlayerState(player)
+        local fresh = newPlayerState(player, prevScore)  -- carry score over
         fresh.difficulty   = diff
         fresh.enemyHpMult  = hm
         fresh.enemyDmgMult = dm

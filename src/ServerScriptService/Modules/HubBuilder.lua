@@ -195,6 +195,7 @@ function HubBuilder.build(parent)
     -- Counter
     local counter1 = makePart(Vector3.new(14, 4, 3), Color3.fromRGB(18, 14, 28),
         Enum.Material.Slate, folder)
+    counter1.Name  = "WeaponsCounter"
     counter1.CFrame = CFrame.new(vx, oy + 2, vz + 4)
 
     local counterTop1 = makePart(Vector3.new(15, 0.4, 4), Color3.fromRGB(30, 20, 45),
@@ -251,6 +252,7 @@ function HubBuilder.build(parent)
 
     local counter2 = makePart(Vector3.new(14, 4, 3), Color3.fromRGB(14, 20, 16),
         Enum.Material.Slate, folder)
+    counter2.Name  = "UpgradesCounter"
     counter2.CFrame = CFrame.new(ux, oy + 2, uz + 4)
 
     local counterTop2 = makePart(Vector3.new(15, 0.4, 4), Color3.fromRGB(22, 35, 28),

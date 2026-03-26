@@ -224,6 +224,143 @@ local EnemyData = {
         bodySize       = Vector3.new(5.5, 6.5, 5.5),
         score          = 200,
     },
+
+    -- ── Wave 2 enemies ────────────────────────────────────────────────────────
+
+    -- Very fast shadow assassin that teleports to close gaps
+    ShadowWraith = {
+        displayName      = "Shadow Wraith",
+        maxHp            = 35,
+        speed            = 32,
+        attackType       = "melee",
+        attackDamage     = 20,
+        attackRange      = 4,
+        attackCooldown   = 0.5,
+        detectionRange   = 55,
+        teleports        = true,
+        teleportCooldown = 2.5,
+        teleportRange    = 20,
+        color            = Color3.fromRGB(60, 20, 80),
+        bodySize         = Vector3.new(1.5, 3.5, 1.5),
+        score            = 85,
+    },
+
+    -- Shoots from range then teleports to reposition
+    VoidStalker = {
+        displayName      = "Void Stalker",
+        maxHp            = 55,
+        speed            = 10,
+        attackType       = "ranged",
+        attackDamage     = 30,
+        attackRange      = 45,
+        attackCooldown   = 2.8,
+        projectileSpeed  = 90,
+        detectionRange   = 60,
+        teleports        = true,
+        teleportCooldown = 5,
+        teleportRange    = 25,
+        color            = Color3.fromRGB(80, 30, 120),
+        bodySize         = Vector3.new(2, 3, 2),
+        score            = 100,
+    },
+
+    -- Fast flying melee attacker
+    RazorWing = {
+        displayName    = "Razor Wing",
+        maxHp          = 42,
+        speed          = 22,
+        attackType     = "melee",
+        attackDamage   = 16,
+        attackRange    = 4,
+        attackCooldown = 0.65,
+        detectionRange = 48,
+        floats         = true,
+        hoverHeight    = 8,
+        color          = Color3.fromRGB(200, 80, 40),
+        bodySize       = Vector3.new(3, 1, 3),
+        score          = 75,
+    },
+
+    -- Slow but hardy ranged caster
+    Necromancer = {
+        displayName    = "Necromancer",
+        maxHp          = 70,
+        speed          = 6,
+        attackType     = "ranged",
+        attackDamage   = 18,
+        attackRange    = 35,
+        attackCooldown = 3.5,
+        projectileSpeed = 50,
+        detectionRange = 50,
+        color          = Color3.fromRGB(50, 180, 100),
+        bodySize       = Vector3.new(2, 4, 2),
+        score          = 130,
+    },
+
+    -- Heavy armored melee unit with damage-reducing shield
+    MechKnight = {
+        displayName    = "Mech Knight",
+        maxHp          = 200,
+        speed          = 8,
+        attackType     = "melee",
+        attackDamage   = 45,
+        attackRange    = 8,
+        attackCooldown = 1.4,
+        detectionRange = 30,
+        armorReduction = 0.35,
+        color          = Color3.fromRGB(80, 100, 140),
+        bodySize       = Vector3.new(3, 5, 3),
+        score          = 160,
+    },
+
+    -- Rushes in and deals huge explosion damage once; effectively a living bomb
+    SpiderMine = {
+        displayName    = "Spider Mine",
+        maxHp          = 25,
+        speed          = 20,
+        attackType     = "melee",
+        attackDamage   = 55,
+        attackRange    = 3,
+        attackCooldown = 99,
+        detectionRange = 35,
+        color          = Color3.fromRGB(220, 60, 20),
+        bodySize       = Vector3.new(1.5, 1, 1.5),
+        score          = 50,
+    },
+
+    -- Massive slow crystalline tank with extreme armor
+    CrystalGolem = {
+        displayName    = "Crystal Golem",
+        maxHp          = 280,
+        speed          = 5,
+        attackType     = "melee",
+        attackDamage   = 50,
+        attackRange    = 9,
+        attackCooldown = 2.2,
+        detectionRange = 22,
+        armorReduction = 0.5,
+        color          = Color3.fromRGB(100, 200, 255),
+        bodySize       = Vector3.new(4.5, 6, 4.5),
+        score          = 180,
+    },
+
+    -- Ranged acid attacker that leaves damaging trails
+    AcidCrawler = {
+        displayName    = "Acid Crawler",
+        maxHp          = 60,
+        speed          = 15,
+        attackType     = "ranged",
+        attackDamage   = 10,
+        dotDamage      = 8,
+        dotDuration    = 4,
+        attackRange    = 25,
+        attackCooldown = 2.0,
+        projectileSpeed = 40,
+        detectionRange = 40,
+        color          = Color3.fromRGB(80, 220, 60),
+        bodySize       = Vector3.new(3, 2, 3),
+        score          = 80,
+    },
 }
 
 return EnemyData

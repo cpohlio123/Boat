@@ -267,6 +267,24 @@ function LevelGenerator.generate(levelNumber, parent)
 
     buildTunnelShell(totalZ, zone, folder)
 
+    -- ── Guaranteed solid spawn pad — player CANNOT fall through this ─────────
+    -- Covers the FULL tunnel width and the first 4 sections (z=0 to z=DEPTH*4).
+    -- This is the safety net that prevents the player ever spawning over a gap.
+    local spawnPadY = -HALF + FSIZE.Y * 0.5
+    local spawnPad  = makePart(
+        Vector3.new(HALF * 2, FSIZE.Y, DEPTH * 4),
+        zone.floorColor, Enum.Material.SmoothPlastic, folder)
+    spawnPad.Name   = "SpawnPad"
+    spawnPad.CFrame = CFrame.new(0, spawnPadY, DEPTH * 2)
+
+    -- Accent strip on spawn pad
+    local spawnAccent = makePart(
+        Vector3.new(HALF * 2, 0.12, DEPTH * 4),
+        zone.accentColor, Enum.Material.Neon, folder)
+    spawnAccent.CFrame     = CFrame.new(0, spawnPadY + FSIZE.Y * 0.5 + 0.06, DEPTH * 2)
+    spawnAccent.CanCollide = false
+    spawnAccent.Transparency = 0.7
+
     -- Ambient end-of-tunnel light source at start
     local startLight = Instance.new("PointLight")
     startLight.Color      = zone.accentColor
